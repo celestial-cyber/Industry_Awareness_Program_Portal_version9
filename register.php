@@ -19,7 +19,7 @@ $conn->query($sql);
 $conn->select_db("iap_portal");
 
 // Create tables if not exist
-$sql = "CREATE TABLE IF NOT EXISTS session_registrations (
+$sql = "CREATE TABLE IF NOT EXISTS iap_session_registrations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     roll_number VARCHAR(50) NOT NULL,
@@ -46,7 +46,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $session_desired = $_POST['session_desired'];
     $other_query = $_POST['other_query'];
 
-    $sql = "INSERT INTO session_registrations (name, roll_number, year, department, email, session_desired, other_query) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $sql = "INSERT INTO iap_session_registrations (name, roll_number, year, department, email, session_desired, other_query) VALUES (?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("sssssss", $name, $roll_number, $year, $department, $email, $session_desired, $other_query);
 

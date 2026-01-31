@@ -23,7 +23,7 @@ $conn->query($sql);
 $conn->select_db("iap_portal");
 
 // Create tables if not exist
-$sql = "CREATE TABLE IF NOT EXISTS IAP_users_details (
+$sql = "CREATE TABLE IF NOT EXISTS iap_users_details (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) NOT NULL UNIQUE,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -33,12 +33,12 @@ $sql = "CREATE TABLE IF NOT EXISTS IAP_users_details (
 $conn->query($sql);
 
 // Alter table to add email column if it doesn't exist
-$check_email = $conn->query("SHOW COLUMNS FROM IAP_users_details LIKE 'email'");
-if ($check_email->num_rows == 0) {
-    $conn->query("ALTER TABLE IAP_users_details ADD COLUMN email VARCHAR(255) NOT NULL UNIQUE DEFAULT 'temp@example.com'");
+$check_email = $conn->query("SHOW COLUMNS FROM iap_users_details LIKE 'email'");
+if ($check_email && $check_email->num_rows == 0) {
+    $conn->query("ALTER TABLE iap_users_details ADD COLUMN email VARCHAR(255) NOT NULL UNIQUE DEFAULT 'temp@example.com'");
 }
 
-$sql = "CREATE TABLE IF NOT EXISTS session_registrations (
+$sql = "CREATE TABLE IF NOT EXISTS iap_session_registrations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     roll_number VARCHAR(50) NOT NULL,
@@ -59,8 +59,56 @@ $sql = "CREATE TABLE IF NOT EXISTS sessions (
 );";
 $conn->query($sql);
 
+$sql = "CREATE TABLE IF NOT EXISTS iap_session_suggestions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    roll_number VARCHAR(50) NOT NULL,
+    year ENUM('1', '2', '3', '4') NOT NULL,
+    branch VARCHAR(100) NOT NULL,
+    section VARCHAR(100) NOT NULL,
+    session_desired TEXT NOT NULL,
+    other_query TEXT,
+    status ENUM('pending', 'reviewed', 'approved', 'rejected') DEFAULT 'pending',
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS iap_students (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    roll_number VARCHAR(50) NOT NULL UNIQUE,
+    department VARCHAR(100),
+    year ENUM('1', '2', '3', '4'),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL UNIQUE,
+    score DECIMAL(5,2) NOT NULL,
+    trait_a INT,
+    trait_b INT,
+    trait_c INT,
+    trait_d INT,
+    completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL,
+    session_id INT NOT NULL,
+    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);";
+$conn->query($sql);
+
 // Insert default admin if not exists
-$sql = 'INSERT IGNORE INTO IAP_users_details (username, email, password, role) VALUES (\'admin\', \'admin@example.com\', \'$2y$10$xHDNFM0xYFstLYe.BIHMUu4ZxCcEeKOQ3psUy85ZcbsCqdbWUy2Z.\', \'admin\')';
+$sql = 'INSERT IGNORE INTO iap_users_details (username, email, password, role) VALUES (\'admin\', \'admin@example.com\', \'$2y$10$xHDNFM0xYFstLYe.BIHMUu4ZxCcEeKOQ3psUy85ZcbsCqdbWUy2Z.\', \'admin\')';
 $conn->query($sql);
 
 $message = '';
@@ -88,7 +136,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['request_id']) && isset
 
     $valid_statuses = ['pending', 'reviewed', 'approved', 'rejected'];
     if (in_array($new_status, $valid_statuses)) {
-        $sql = "UPDATE session_suggestions SET status = ? WHERE id = ?";
+        $sql = "UPDATE iap_session_suggestions SET status = ? WHERE id = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("si", $new_status, $request_id);
 
@@ -102,8 +150,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['request_id']) && isset
 }
 
 if ($page == 'requests') {
-    $sql = "SELECT * FROM session_suggestions ORDER BY submitted_at DESC";
+    $sql = "SELECT * FROM iap_session_suggestions ORDER BY submitted_at DESC";
     $result = $conn->query($sql);
+
+    if (!$result) {
+        die("MySQL Error fetching session suggestions: " . $conn->error);
+    }
+
 } else if ($page == 'registered_students') {
     // Fetch all students who registered through student_sessions
     $sql = "SELECT DISTINCT
@@ -115,36 +168,45 @@ if ($page == 'requests') {
                 s.year,
                 COUNT(DISTINCT ss.session_id) as sessions_count,
                 GROUP_CONCAT(DISTINCT sess.topic SEPARATOR ', ') as registered_sessions,
-                COALESCE(ps.score, 0) as psychometric_score,
+                COALESCE(ps.score, 0) as iap_psychometric_score,
                 CASE WHEN ps.score IS NOT NULL THEN 'Completed' ELSE 'Not Taken' END as assessment_status
-            FROM students s
-            LEFT JOIN student_sessions ss ON s.id = ss.student_id
+            FROM iap_students s
+            LEFT JOIN iap_student_sessions ss ON s.id = ss.student_id
             LEFT JOIN sessions sess ON ss.session_id = sess.id
-            LEFT JOIN psychometric_scores ps ON s.id = ps.student_id
+            LEFT JOIN iap_psychometric_scores ps ON s.id = ps.student_id
             GROUP BY s.id
             ORDER BY s.created_at DESC";
     $registered_students_result = $conn->query($sql);
     if (!$registered_students_result) {
         // Fallback query if the join fails
-        $sql = "SELECT id, full_name, email, roll_number, department, year FROM students ORDER BY created_at DESC";
+        $sql = "SELECT id, full_name, email, roll_number, department, year FROM iap_students ORDER BY created_at DESC";
         $registered_students_result = $conn->query($sql);
+        if (!$registered_students_result) {
+            die("MySQL Error fetching registered students: " . $conn->error);
+        }
     }
 } else if ($page == 'psychometric_status') {
     // Fetch students who have taken the psychometric test
     $sql_completed = "SELECT s.id, s.full_name, s.email, s.roll_number, s.department, s.year,
                              ps.score, ps.trait_a, ps.trait_b, ps.trait_c, ps.trait_d, ps.completed_at
-                      FROM students s
-                      INNER JOIN psychometric_scores ps ON s.id = ps.student_id
+                      FROM iap_students s
+                      INNER JOIN iap_psychometric_scores ps ON s.id = ps.student_id
                       ORDER BY ps.completed_at DESC";
     $completed_result = $conn->query($sql_completed);
+    if (!$completed_result) {
+        die("MySQL Error fetching completed psychometric results: " . $conn->error);
+    }
 
     // Fetch students who haven't taken the psychometric test
     $sql_pending = "SELECT s.id, s.full_name, s.email, s.roll_number, s.department, s.year
-                    FROM students s
-                    LEFT JOIN psychometric_scores ps ON s.id = ps.student_id
+                    FROM iap_students s
+                    LEFT JOIN iap_psychometric_scores ps ON s.id = ps.student_id
                     WHERE ps.student_id IS NULL
                     ORDER BY s.created_at DESC";
     $pending_result = $conn->query($sql_pending);
+    if (!$pending_result) {
+        die("MySQL Error fetching pending psychometric results: " . $conn->error);
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -543,19 +605,44 @@ if ($page == 'requests') {
 
                 <?php
                 // Fetch statistics
-                $total_students = $conn->query("SELECT COUNT(*) as count FROM students")->fetch_assoc()['count'] ?? 0;
-                $total_sessions = $conn->query("SELECT COUNT(*) as count FROM sessions")->fetch_assoc()['count'] ?? 0;
-                $total_registrations = $conn->query("SELECT COUNT(*) as count FROM student_sessions")->fetch_assoc()['count'] ?? 0;
+                $total_students = 0;
+                $total_sessions = 0;
+                $total_registrations = 0;
                 $total_quizzes = 0; // Placeholder - implement when quiz table is available
 
+                $students_result = $conn->query("SELECT COUNT(*) as count FROM iap_students");
+                if ($students_result) {
+                    $total_students = $students_result->fetch_assoc()['count'] ?? 0;
+                }
+
+                $sessions_result = $conn->query("SELECT COUNT(*) as count FROM sessions");
+                if ($sessions_result) {
+                    $total_sessions = $sessions_result->fetch_assoc()['count'] ?? 0;
+                }
+
+                // Assuming iap_session_registrations table exists for registrations
+                $registrations_result = $conn->query("SELECT COUNT(*) as count FROM iap_session_registrations");
+                if ($registrations_result) {
+                    $total_registrations = $registrations_result->fetch_assoc()['count'] ?? 0;
+                }
+
                 // Fetch psychometric statistics
-                $psychometric_completed = $conn->query("SELECT COUNT(*) as count FROM psychometric_scores")->fetch_assoc()['count'] ?? 0;
-                $psychometric_pending = $total_students - $psychometric_completed;
+                $psychometric_completed = 0;
+                $psychometric_pending = 0;
                 $avg_psychometric_score = 0;
 
+                $psychometric_completed_result = $conn->query("SELECT COUNT(*) as count FROM iap_psychometric_scores");
+                if ($psychometric_completed_result) {
+                    $psychometric_completed = $psychometric_completed_result->fetch_assoc()['count'] ?? 0;
+                }
+                $psychometric_pending = $total_students - $psychometric_completed;
+
                 if ($psychometric_completed > 0) {
-                    $avg_result = $conn->query("SELECT AVG(score) as avg_score FROM psychometric_scores")->fetch_assoc();
-                    $avg_psychometric_score = round($avg_result['avg_score'], 1);
+                    $avg_result = $conn->query("SELECT AVG(score) as avg_score FROM iap_psychometric_scores");
+                    if ($avg_result) {
+                        $avg_score_data = $avg_result->fetch_assoc();
+                        $avg_psychometric_score = round($avg_score_data['avg_score'], 1);
+                    }
                 }
 
                 $psychometric_completion_rate = $total_students > 0 ? round(($psychometric_completed / $total_students) * 100, 1) : 0;
@@ -777,7 +864,7 @@ if ($page == 'requests') {
 
             <?php elseif ($page == 'registered_students'): ?>
                 <h2 class="section-title">Registered Students via Student Portal</h2>
-                <?php if (isset($registered_students_result) && $registered_students_result->num_rows > 0): ?>
+                <?php if ($registered_students_result && $registered_students_result->num_rows > 0): ?>
                     <table>
                         <thead>
                             <tr>
@@ -804,15 +891,15 @@ if ($page == 'requests') {
                                     <td><?php echo htmlspecialchars($row['roll_number']); ?></td>
                                     <td><?php echo htmlspecialchars($row['department']); ?></td>
                                     <td>Year <?php echo htmlspecialchars($row['year']); ?></td>
-                                    <td><strong><?php echo $row['sessions_count']; ?></strong></td>
+                                    <td><strong><?php echo $row['sessions_count'] ?? 0; ?></strong></td>
                                     <td>
                                         <small><?php
                                             echo $row['registered_sessions'] ? htmlspecialchars($row['registered_sessions']) : '<em>None</em>';
                                         ?></small>
                                     </td>
                                     <td>
-                                        <span style="background: <?php echo $row['psychometric_score'] > 0 ? '#dcfce7' : '#f3f4f6'; ?>; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: <?php echo $row['psychometric_score'] > 0 ? '#166534' : '#6b7280'; ?>;">
-                                            <?php echo $row['psychometric_score'] > 0 ? round($row['psychometric_score'], 1) . '%' : 'N/A'; ?>
+                                        <span style="background: <?php echo $row['iap_psychometric_score'] > 0 ? '#dcfce7' : '#f3f4f6'; ?>; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: <?php echo $row['iap_psychometric_score'] > 0 ? '#166534' : '#6b7280'; ?>;">
+                                            <?php echo $row['iap_psychometric_score'] > 0 ? round($row['iap_psychometric_score'], 1) . '%' : 'N/A'; ?>
                                         </span>
                                     </td>
                                     <td>
@@ -844,7 +931,7 @@ if ($page == 'requests') {
 
                 <!-- Students Who Have Completed the Assessment -->
                 <h3 style="color: #28a745; margin-top: 40px;"><i class="fa fa-check-circle"></i> Students Who Have Completed Assessment</h3>
-                <?php if (isset($completed_result) && $completed_result->num_rows > 0): ?>
+                <?php if ($completed_result && $completed_result->num_rows > 0): ?>
                     <table>
                         <thead>
                             <tr>
@@ -885,7 +972,7 @@ if ($page == 'requests') {
 
                 <!-- Students Who Haven't Taken the Assessment -->
                 <h3 style="color: #dc3545; margin-top: 40px;"><i class="fa fa-times-circle"></i> Students Who Haven't Taken Assessment</h3>
-                <?php if (isset($pending_result) && $pending_result->num_rows > 0): ?>
+                <?php if ($pending_result && $pending_result->num_rows > 0): ?>
                     <table>
                         <thead>
                             <tr>

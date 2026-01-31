@@ -1,7 +1,7 @@
 <?php
 /**
  * Student Registration Page
- * Allows students to register using roll number and email
+ * Allows IAP_students to register using roll number and email
  * Automatically assigns default password "student@IAP" hashed with password_hash()
  * Sets is_password_changed = 0 (false) to force password reset on first login
  * Uses MySQLi prepared statements for security
@@ -73,8 +73,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $conn->select_db("iap_portal");
             $conn->set_charset("utf8");
             
-            // Create students table if not exists
-            $create_table_sql = "CREATE TABLE IF NOT EXISTS students (
+            // Create IAP_students table if not exists
+            $create_table_sql = "CREATE TABLE IF NOT EXISTS IAP_students (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 roll_number VARCHAR(50) NOT NULL UNIQUE,
                 full_name VARCHAR(255) NOT NULL,
@@ -102,23 +102,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 if (!$conn->query($create_sessions_table_sql)) {
                     $error_message = "Error creating sessions table: " . $conn->error;
                 } else {
-                    // Create student_sessions table if not exists
-                    $create_student_sessions_sql = "CREATE TABLE IF NOT EXISTS student_sessions (
+                    // Create iap_student_sessions table if not exists
+                    $create_iap_student_sessions_sql = "CREATE TABLE IF NOT EXISTS iap_iap_student_sessions (
                         id INT AUTO_INCREMENT PRIMARY KEY,
                         student_id INT NOT NULL,
                         session_id INT NOT NULL,
                         registration_status ENUM('registered', 'completed', 'dropped') DEFAULT 'registered',
                         registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                        FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE,
                         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
                         UNIQUE KEY unique_student_session (student_id, session_id)
                     )";
                     
-                    if (!$conn->query($create_student_sessions_sql)) {
-                        $error_message = "Error creating student_sessions table: " . $conn->error;
+                    if (!$conn->query($create_iap_student_sessions_sql)) {
+                        $error_message = "Error creating iap_student_sessions table: " . $conn->error;
                     } else {
                         // Check if student already exists
-                        $check_sql = "SELECT id FROM students WHERE roll_number = ? OR email = ?";
+                        $check_sql = "SELECT id FROM IAP_students WHERE roll_number = ? OR email = ?";
                         $check_stmt = $conn->prepare($check_sql);
                         
                         if (!$check_stmt) {
@@ -136,7 +136,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 $password_hash = password_hash($default_password, PASSWORD_BCRYPT);
                                 
                                 // Insert new student with default password and is_password_changed = 0
-                                $insert_sql = "INSERT INTO students (roll_number, full_name, email, department, year, password, is_password_changed) 
+                                $insert_sql = "INSERT INTO IAP_students (roll_number, full_name, email, department, year, password, is_password_changed) 
                                               VALUES (?, ?, ?, ?, ?, ?, 0)";
                                 
                                 $insert_stmt = $conn->prepare($insert_sql);
@@ -154,7 +154,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                             $session_id = intval($_GET['session']);
                                             
                                             // Register student for the selected session
-                                            $register_sql = "INSERT IGNORE INTO student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
+                                            $register_sql = "INSERT IGNORE INTO iap_student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
                                             $reg_stmt = $conn->prepare($register_sql);
                                             $reg_stmt->bind_param("ii", $new_student_id, $session_id);
                                             $reg_stmt->execute();

@@ -15,7 +15,7 @@ USE iap_portal;
 -- Password field uses bcrypt hashing (60 characters)
 -- is_password_changed tracks if student has changed default password
 
-CREATE TABLE IF NOT EXISTS students (
+CREATE TABLE IF NOT EXISTS iap_students (
     id INT AUTO_INCREMENT PRIMARY KEY,
     roll_number VARCHAR(50) NOT NULL UNIQUE,
     full_name VARCHAR(255) NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- Many-to-many relationship: one student can register for multiple sessions
 -- registration_status tracks: registered, completed, or dropped
 
-CREATE TABLE IF NOT EXISTS student_sessions (
+CREATE TABLE IF NOT EXISTS iap_student_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     student_id INT NOT NULL,
     session_id INT NOT NULL,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS student_sessions (
 -- Bcrypt hash: $2y$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWdeS86E36P4/ECm
 -- is_password_changed = FALSE (student must reset on first login)
 
-INSERT IGNORE INTO students (roll_number, full_name, email, department, year, password, is_password_changed) 
+INSERT IGNORE INTO iap_students (roll_number, full_name, email, department, year, password, is_password_changed) 
 VALUES 
 ('2021001', 'Test Student', 'test@example.com', 'Computer Science', '1', '$2y$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWdeS86E36P4/ECm', FALSE),
 ('2021002', 'Jane Smith', 'jane.smith@example.com', 'Information Technology', '2', '$2y$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWdeS86E36P4/ECm', FALSE),
@@ -108,7 +108,7 @@ VALUES
 -- ============================================================================
 -- Register sample students for various sessions
 
-INSERT IGNORE INTO student_sessions (student_id, session_id, registration_status) 
+INSERT IGNORE INTO iap_student_sessions (student_id, session_id, registration_status) 
 VALUES 
 (1, 1, 'registered'),
 (1, 2, 'registered'),
@@ -124,13 +124,13 @@ VALUES
 -- ============================================================================
 -- Run these to verify everything was created correctly
 
-SELECT 'Students Table' as table_name, COUNT(*) as count FROM students;
+SELECT 'Students Table' as table_name, COUNT(*) as count FROM iap_students;
 SELECT 'Sessions Table' as table_name, COUNT(*) as count FROM sessions;
-SELECT 'Student Sessions' as table_name, COUNT(*) as count FROM student_sessions;
+SELECT 'Student Sessions' as table_name, COUNT(*) as count FROM iap_student_sessions;
 
 -- View sample student data
 SELECT 'Student Records:' as info;
-SELECT id, roll_number, full_name, year, department FROM students LIMIT 10;
+SELECT id, roll_number, full_name, year, department FROM iap_students LIMIT 10;
 
 -- View sample session data
 SELECT 'Session Records:' as info;
@@ -145,8 +145,8 @@ SELECT
     sess.year,
     ss.registration_status,
     ss.registered_at
-FROM student_sessions ss
-JOIN students s ON ss.student_id = s.id
+FROM iap_student_sessions ss
+JOIN iap_students s ON ss.student_id = s.id
 JOIN sessions sess ON ss.session_id = sess.id
 LIMIT 10;
 

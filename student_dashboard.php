@@ -22,7 +22,7 @@ try {
                 ss.registration_status,
                 ss.registered_at
             FROM sessions s
-            JOIN student_sessions ss ON s.id = ss.session_id
+            JOIN iap_student_sessions ss ON s.id = ss.session_id
             WHERE ss.student_id = ?
             ORDER BY s.year ASC, s.topic ASC";
     
@@ -88,7 +88,7 @@ if (isset($_POST['update_profile'])) {
     } else {
         try {
             // Verify current password
-            $sql = "SELECT password FROM students WHERE id = ?";
+            $sql = "SELECT password FROM IAP_students WHERE id = ?";
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("i", $_SESSION['student_id']);
             $stmt->execute();
@@ -110,7 +110,7 @@ if (isset($_POST['update_profile'])) {
                         $profile_message_type = 'danger';
                     } else {
                         // Check if email is already taken by another student
-                        $email_check_sql = "SELECT id FROM students WHERE email = ? AND id != ?";
+                        $email_check_sql = "SELECT id FROM IAP_students WHERE email = ? AND id != ?";
                         $email_check_stmt = $conn->prepare($email_check_sql);
                         $email_check_stmt->bind_param("si", $email, $_SESSION['student_id']);
                         $email_check_stmt->execute();
@@ -121,7 +121,7 @@ if (isset($_POST['update_profile'])) {
                             $profile_message_type = 'danger';
                         } else {
                             // Update student profile
-                            $update_sql = "UPDATE students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ? WHERE id = ?";
+                            $update_sql = "UPDATE IAP_students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ? WHERE id = ?";
                             $update_stmt = $conn->prepare($update_sql);
                             $update_stmt->bind_param("sssssi", $full_name, $email, $roll_number, $department, $year, $_SESSION['student_id']);
 
@@ -184,7 +184,7 @@ if (isset($_POST['reset_password'])) {
     } else {
         try {
             // Verify current password
-            $sql = "SELECT password FROM students WHERE id = ?";
+            $sql = "SELECT password FROM IAP_students WHERE id = ?";
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("i", $_SESSION['student_id']);
             $stmt->execute();
@@ -199,7 +199,7 @@ if (isset($_POST['reset_password'])) {
                     $token_expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
 
                     // Store reset token in database
-                    $update_sql = "UPDATE students SET reset_token = ?, reset_token_expiry = ? WHERE id = ?";
+                    $update_sql = "UPDATE IAP_students SET reset_token = ?, reset_token_expiry = ? WHERE id = ?";
                     $update_stmt = $conn->prepare($update_sql);
                     $update_stmt->bind_param("ssi", $reset_token, $token_expiry, $_SESSION['student_id']);
 
@@ -1014,7 +1014,7 @@ if (isset($_POST['reset_password'])) {
                 <?php
                 // Fetch all available sessions
                 $all_sessions_sql = "SELECT s.*, COUNT(ss.student_id) as registered_count FROM sessions s
-                                   LEFT JOIN student_sessions ss ON s.id = ss.session_id
+                                   LEFT JOIN IAP_student_sessions ss ON s.id = ss.session_id
                                    GROUP BY s.id ORDER BY s.year ASC, s.title ASC";
                 $all_sessions_result = $conn->query($all_sessions_sql);
 

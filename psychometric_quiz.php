@@ -143,7 +143,7 @@ $psychometric_key = [
 // --- LOGIC ---
 // Check if student has already taken the test
 $student_id = $_SESSION['student_id'];
-$check_sql = "SELECT score FROM psychometric_scores WHERE student_id = ?";
+$check_sql = "SELECT score FROM iap_psychometric_scores WHERE student_id = ?";
 $check_stmt = $conn->prepare($check_sql);
 $check_stmt->bind_param("i", $student_id);
 $check_stmt->execute();
@@ -188,10 +188,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 
     // Calculate the psychometric score as a percentage of the 20 questions
-    $psychometric_score = ($totalDesiredAnswers / 20) * 100;
+    $iap_psychometric_score = ($totalDesiredAnswers / 20) * 100;
 
     // Store the score in the database
-    $sql = "INSERT INTO psychometric_scores (student_id, score, trait_a, trait_b, trait_c, trait_d, completed_at)
+    $sql = "INSERT INTO iap_psychometric_scores (student_id, score, trait_a, trait_b, trait_c, trait_d, completed_at)
             VALUES (?, ?, ?, ?, ?, ?, NOW())
             ON DUPLICATE KEY UPDATE
             score = VALUES(score),
@@ -202,10 +202,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             completed_at = NOW()";
 
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("iiiiii", $studentId, $psychometric_score, $traitScores['A'], $traitScores['B'], $traitScores['C'], $traitScores['D']);
+    $stmt->bind_param("iiiiii", $studentId, $iap_psychometric_score, $traitScores['A'], $traitScores['B'], $traitScores['C'], $traitScores['D']);
 
     if ($stmt->execute()) {
-        $submission_message = "<div class='alert alert-success'><i class='fas fa-check-circle'></i> Thank you for completing the psychometric assessment! Your responses have been recorded and your score is <strong>" . round($psychometric_score, 2) . "%</strong>.</div>";
+        $submission_message = "<div class='alert alert-success'><i class='fas fa-check-circle'></i> Thank you for completing the psychometric assessment! Your responses have been recorded and your score is <strong>" . round($iap_psychometric_score, 2) . "%</strong>.</div>";
     } else {
         $submission_message = "<div class='alert alert-danger'><i class='fas fa-exclamation-circle'></i> Error saving results: " . $stmt->error . "</div>";
     }

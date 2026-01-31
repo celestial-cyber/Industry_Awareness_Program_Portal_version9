@@ -24,7 +24,7 @@ if ($session_id <= 0) {
         // Server-side validation: Check if student is registered for this session
         // Using prepared statement to prevent SQL injection
         $validation_sql = "SELECT ss.id, s.id as session_id, s.title, s.year, s.description, ss.registration_status
-                          FROM student_sessions ss
+                          FROM iap_student_sessions ss
                           JOIN sessions s ON ss.session_id = s.id
                           WHERE ss.student_id = ? AND s.id = ?";
         

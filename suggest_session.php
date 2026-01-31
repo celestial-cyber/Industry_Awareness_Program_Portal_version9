@@ -19,7 +19,7 @@ $conn->query($sql);
 $conn->select_db("iap_portal");
 
 // Create session_suggestions table
-$sql = "CREATE TABLE IF NOT EXISTS session_suggestions (
+$sql = "CREATE TABLE IF NOT EXISTS iap_session_suggestions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     roll_number VARCHAR(50) NOT NULL,

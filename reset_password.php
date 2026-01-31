@@ -56,7 +56,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $hashed_password = password_hash($new_password, PASSWORD_BCRYPT);
         
         // Update password in database using prepared statement
-        $sql = "UPDATE students SET password = ?, is_password_changed = TRUE WHERE id = ?";
+        $sql = "UPDATE IAP_students SET password = ?, is_password_changed = TRUE WHERE id = ?";
         $stmt = $conn->prepare($sql);
         
         if (!$stmt) {

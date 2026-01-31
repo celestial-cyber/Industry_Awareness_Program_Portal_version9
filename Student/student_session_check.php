@@ -32,7 +32,7 @@ if ($conn->connect_error) {
 $conn->set_charset("utf8");
 
 // Verify that the student still exists in the database (security check)
-$sql = "SELECT id, roll_number, full_name FROM students WHERE id = ? AND roll_number = ?";
+$sql = "SELECT id, roll_number, full_name FROM IAP_students WHERE id = ? AND roll_number = ?";
 $stmt = $conn->prepare($sql);
 
 if (!$stmt) {

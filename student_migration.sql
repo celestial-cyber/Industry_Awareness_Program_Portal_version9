@@ -2,7 +2,7 @@
 -- This file creates/updates tables needed for student authentication and dashboard
 
 -- Create students table (separate from admin users)
-CREATE TABLE IF NOT EXISTS students (
+CREATE TABLE IF NOT EXISTS IAP_students (
     id INT AUTO_INCREMENT PRIMARY KEY,
     roll_number VARCHAR(50) NOT NULL UNIQUE,
     full_name VARCHAR(255) NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 -- Create student_sessions junction table (many-to-many relationship)
-CREATE TABLE IF NOT EXISTS student_sessions (
+CREATE TABLE IF NOT EXISTS iap_student_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     student_id INT NOT NULL,
     session_id INT NOT NULL,
@@ -90,7 +90,7 @@ VALUES
 (40, 'Alternative Paths & Contingency Planning', '4', 'Backup career plans');
 
 -- Link sample students to sessions (registrations)
-INSERT IGNORE INTO student_sessions (student_id, session_id, registration_status) 
+INSERT IGNORE INTO iap_student_sessions (student_id, session_id, registration_status) 
 VALUES 
 (1, 1, 'registered'),
 (1, 2, 'registered'),
@@ -102,7 +102,7 @@ VALUES
 (4, 8, 'registered');
 
 -- Create session_suggestions table for student session requests
-CREATE TABLE IF NOT EXISTS session_suggestions (
+CREATE TABLE IF NOT EXISTS iap_session_suggestions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     roll_number VARCHAR(50) NOT NULL,
@@ -116,18 +116,18 @@ CREATE TABLE IF NOT EXISTS session_suggestions (
 );
 
 -- Insert sample session suggestions
-INSERT IGNORE INTO session_suggestions (name, roll_number, year, branch, section, session_desired, other_query, status)
+INSERT IGNORE INTO iap_session_suggestions (name, roll_number, year, branch, section, session_desired, other_query, status)
 VALUES
 ('Sample Student', '2021001', '1', 'Computer Science', 'A', 'Advanced Python Programming', 'Would love to learn more about data structures and algorithms', 'pending'),
 ('Another Student', '2021002', '2', 'Information Technology', 'B', 'Machine Learning Workshop', 'Interested in AI and ML applications', 'reviewed');
 
 -- Add password reset columns to students table
-ALTER TABLE students
+ALTER TABLE IAP_students
 ADD COLUMN reset_token VARCHAR(255) NULL,
 ADD COLUMN reset_token_expiry DATETIME NULL;
 
 -- Create psychometric_scores table for storing assessment results
-CREATE TABLE IF NOT EXISTS psychometric_scores (
+CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
     id INT AUTO_INCREMENT PRIMARY KEY,
     student_id INT NOT NULL,
     score DECIMAL(5,2) NOT NULL,

@@ -20,7 +20,7 @@ if (isset($_GET['token'])) {
 
     try {
         // Verify token and check expiry
-        $sql = "SELECT id, full_name, email, reset_token_expiry FROM students WHERE reset_token = ? AND reset_token_expiry > NOW()";
+        $sql = "SELECT id, full_name, email, reset_token_expiry FROM IAP_students WHERE reset_token = ? AND reset_token_expiry > NOW()";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("s", $token);
         $stmt->execute();
@@ -64,7 +64,7 @@ if (isset($_POST['update_password']) && $token_valid) {
             $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
 
             // Update password and clear reset token
-            $update_sql = "UPDATE students SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?";
+            $update_sql = "UPDATE IAP_students SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?";
             $update_stmt = $conn->prepare($update_sql);
             $update_stmt->bind_param("si", $hashed_password, $student_id);
 

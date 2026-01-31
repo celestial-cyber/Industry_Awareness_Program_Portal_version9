@@ -28,7 +28,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $conn->select_db("iap_portal");
 
     // Create tables if not exist
-    $sql = "CREATE TABLE IF NOT EXISTS IAP_users_details (
+    $sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(255) NOT NULL UNIQUE,
         email VARCHAR(255) NOT NULL UNIQUE,
@@ -38,16 +38,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $conn->query($sql);
 
     // Alter table to add email column if it doesn't exist
-    $check_email = $conn->query("SHOW COLUMNS FROM IAP_users_details LIKE 'email'");
+    $check_email = $conn->query("SHOW COLUMNS FROM iap_users_details LIKE 'email'");
     if ($check_email->num_rows == 0) {
-        $conn->query("ALTER TABLE IAP_users_details ADD COLUMN email VARCHAR(255) NOT NULL UNIQUE DEFAULT 'temp@example.com'");
+        $conn->query("ALTER TABLE iap_users_details ADD COLUMN email VARCHAR(255) NOT NULL UNIQUE DEFAULT 'temp@example.com'");
     }
 
     // Insert default admin if not exists
-    $sql = 'INSERT IGNORE INTO IAP_users_details (username, email, password, role) VALUES (\'admin\', \'admin@example.com\', \'$2y$10$xHDNFM0xYFstLYe.BIHMUu4ZxCcEeKOQ3psUy85ZcbsCqdbWUy2Z.\', \'admin\')';
+    $sql = 'INSERT IGNORE INTO iap_users_details (username, email, password, role) VALUES (\'admin\', \'admin@example.com\', \'$2y$10$xHDNFM0xYFstLYe.BIHMUu4ZxCcEeKOQ3psUy85ZcbsCqdbWUy2Z.\', \'admin\')';
     $conn->query($sql);
 
-    $sql = "SELECT * FROM IAP_users_details WHERE email = ? AND role = 'admin'";
+    $sql = "SELECT * FROM iap_users_details WHERE email = ? AND role = 'admin'";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
         die("Error preparing statement: " . $conn->error);

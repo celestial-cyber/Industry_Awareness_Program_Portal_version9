@@ -23,7 +23,7 @@ $conn->query($sql);
 $conn->select_db("iap_portal");
 
 // Create tables if not exist
-$sql = "CREATE TABLE IF NOT EXISTS IAP_users_details (
+$sql = "CREATE TABLE IF NOT EXISTS iap_users_details (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
@@ -31,7 +31,7 @@ $sql = "CREATE TABLE IF NOT EXISTS IAP_users_details (
 );";
 $conn->query($sql);
 
-$sql = "CREATE TABLE IF NOT EXISTS session_registrations (
+$sql = "CREATE TABLE IF NOT EXISTS iap_session_registrations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     roll_number VARCHAR(50) NOT NULL,
@@ -53,7 +53,7 @@ $sql = "CREATE TABLE IF NOT EXISTS sessions (
 $conn->query($sql);
 
 // Insert default admin if not exists
-$sql = 'INSERT IGNORE INTO IAP_users_details (username, password, role) VALUES (\'admin@sa.com\', \'$2y$10$ACnHZm1VvA1MkO8OmoKv4uOtl4jfdX9F1qFcP4e..e6yugwmvVtxm\', \'admin\')';
+$sql = 'INSERT IGNORE INTO iap_users_details (username, password, role) VALUES (\'admin@sa.com\', \'$2y$10$ACnHZm1VvA1MkO8OmoKv4uOtl4jfdX9F1qFcP4e..e6yugwmvVtxm\', \'admin\')';
 $conn->query($sql);
 
 $sessions = [];

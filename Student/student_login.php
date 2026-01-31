@@ -1,7 +1,7 @@
 <?php
 /**
  * Student Login Page
- * Authenticates students using email and password
+ * Authenticates IAP_students using email and password
  * Uses MySQLi prepared statements for security
  */
 
@@ -41,8 +41,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $conn->query($sql);
             $conn->select_db("iap_portal");
             
-            // Create students table if not exists
-            $create_table_sql = "CREATE TABLE IF NOT EXISTS students (
+            // Create IAP_students table if not exists
+            $create_table_sql = "CREATE TABLE IF NOT EXISTS IAP_students (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 roll_number VARCHAR(50) NOT NULL UNIQUE,
                 full_name VARCHAR(255) NOT NULL,
@@ -68,27 +68,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $conn->query($create_sessions_table_sql);
             
             // Create student_sessions table if not exists
-            $create_student_sessions_sql = "CREATE TABLE IF NOT EXISTS student_sessions (
+            $create_student_sessions_sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 student_id INT NOT NULL,
                 session_id INT NOT NULL,
                 registration_status ENUM('registered', 'completed', 'dropped') DEFAULT 'registered',
                 registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
                 UNIQUE KEY unique_student_session (student_id, session_id)
             )";
             $conn->query($create_student_sessions_sql);
             
             // Insert sample student if table is empty (for testing)
-            $check_sql = "SELECT COUNT(*) as count FROM students";
+            $check_sql = "SELECT COUNT(*) as count FROM IAP_students";
             $result = $conn->query($check_sql);
             $row = $result->fetch_assoc();
             
             if ($row['count'] == 0) {
                 // Default password is "student@IAP"
                 $default_password_hash = password_hash("student@IAP", PASSWORD_BCRYPT);
-                $insert_sql = "INSERT IGNORE INTO students (roll_number, full_name, email, department, year, password, is_password_changed) 
+                $insert_sql = "INSERT IGNORE INTO IAP_students (roll_number, full_name, email, department, year, password, is_password_changed) 
                               VALUES ('2021001', 'Test Student', 'test@example.com', 'Computer Science', '1', ?, FALSE)";
                 $insert_stmt = $conn->prepare($insert_sql);
                 $insert_stmt->bind_param("s", $default_password_hash);
@@ -97,7 +97,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
             
             // Prepare authentication query using prepared statement
-            $sql = "SELECT id, roll_number, full_name, email, department, year, password, is_password_changed FROM students WHERE email = ?";
+            $sql = "SELECT id, roll_number, full_name, email, department, year, password, is_password_changed FROM IAP_students WHERE email = ?";
             $stmt = $conn->prepare($sql);
             
             if (!$stmt) {
