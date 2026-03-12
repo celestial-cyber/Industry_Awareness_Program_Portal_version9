@@ -48,7 +48,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $session_desired = $_POST['session_desired'];
     $other_query = $_POST['other_query'];
 
-    $sql = "INSERT INTO session_suggestions (name, roll_number, year, branch, section, session_desired, other_query)
+    $sql = "INSERT INTO iap_session_suggestions (name, roll_number, year, branch, section, session_desired, other_query)
             VALUES (?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("sssssss", $name, $roll_number, $year, $branch, $section, $session_desired, $other_query);

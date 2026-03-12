@@ -62,6 +62,35 @@ if (isset($_GET['logout'])) {
     exit();
 }
 
+// Handle session registration
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
+    $session_id = intval($_POST['session_id'] ?? 0);
+    
+    if ($session_id > 0) {
+        // Check if already registered
+        $check_sql = "SELECT id FROM iap_student_sessions WHERE student_id = ? AND session_id = ?";
+        $check_stmt = $conn->prepare($check_sql);
+        $check_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+        
+        if ($check_result->num_rows == 0) {
+            // Register for session
+            $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
+            $register_stmt = $conn->prepare($register_sql);
+            $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
+            
+            if ($register_stmt->execute()) {
+                // Redirect with success message
+                header("Location: ?view=view_all_sessions&success=1");
+                exit();
+            }
+            $register_stmt->close();
+        }
+        $check_stmt->close();
+    }
+}
+
 // Handle profile update request
 $profile_message = '';
 $profile_message_type = '';
@@ -918,8 +947,16 @@ if (isset($_POST['reset_password'])) {
                 <i class="fas fa-home"></i> Dashboard
             </a>
 
-            <a href="?view=register_session" class="sidebar-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'register_session') ? 'active' : ''; ?>">
-                <i class="fas fa-plus-circle"></i> Register for Session
+            <a href="?view=view_all_sessions" class="sidebar-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'view_all_sessions') ? 'active' : ''; ?>">
+                <i class="fas fa-list"></i> View All Sessions
+            </a>
+
+            <a href="?view=view_registered_sessions" class="sidebar-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'view_registered_sessions') ? 'active' : ''; ?>">
+                <i class="fas fa-check-circle"></i> View Registered Sessions
+            </a>
+
+            <a href="?view=suggest_session" class="sidebar-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'suggest_session') ? 'active' : ''; ?>">
+                <i class="fas fa-lightbulb"></i> Suggest a Session
             </a>
 
             <a href="?view=view_progress" class="sidebar-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'view_progress') ? 'active' : ''; ?>">
@@ -966,6 +1003,57 @@ if (isset($_POST['reset_password'])) {
         <div class="container-lg">
             <?php
             $view = isset($_GET['view']) ? $_GET['view'] : 'dashboard';
+
+            // Handle session registration
+            if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
+                $session_id = intval($_POST['session_id']);
+                
+                // Check if already registered
+                $check_sql = "SELECT id FROM iap_student_sessions WHERE student_id = ? AND session_id = ?";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+                
+                if ($check_result->num_rows == 0) {
+                    // Not registered yet, so register
+                    $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
+                    $register_stmt = $conn->prepare($register_sql);
+                    $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
+                    
+                    if ($register_stmt->execute()) {
+                        // Refresh registered sessions
+                        $sql = "SELECT 
+                                    s.id,
+                                    s.topic as title,
+                                    s.year,
+                                    '' as description,
+                                    ss.registration_status,
+                                    ss.registered_at
+                                FROM sessions s
+                                JOIN iap_student_sessions ss ON s.id = ss.session_id
+                                WHERE ss.student_id = ?
+                                ORDER BY s.year ASC, s.topic ASC";
+                        
+                        $stmt = $conn->prepare($sql);
+                        $stmt->bind_param("i", $_SESSION['student_id']);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        
+                        $registered_sessions = [];
+                        while ($row = $result->fetch_assoc()) {
+                            $registered_sessions[] = $row;
+                        }
+                        $stmt->close();
+                        
+                        // Redirect to view registered sessions
+                        header("Location: ?view=view_registered_sessions&success=1");
+                        exit();
+                    }
+                    $register_stmt->close();
+                }
+                $check_stmt->close();
+            }
 
             if ($view == 'dashboard') {
                 // Default dashboard view
@@ -1370,6 +1458,298 @@ if (isset($_POST['reset_password'])) {
                             </div>
                         </form>
                     </div>
+                </div>
+
+                <?php
+            } elseif ($view == 'view_all_sessions') {
+                // View All Sessions - Show all sessions with registration option
+                ?>
+                <div class="welcome-header">
+                    <h1><i class="fas fa-list"></i> All Available Sessions</h1>
+                    <p>Browse all available sessions across all years. Click "Get Registered" to register for a session.</p>
+                </div>
+
+                <?php if (isset($_GET['success'])): ?>
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="fas fa-check-circle"></i> Successfully registered for the session! You can now view it in "View Registered Sessions".
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                <?php endif; ?>
+
+                <?php
+                // Fetch all sessions grouped by year
+                $all_sessions_sql = "SELECT * FROM sessions ORDER BY year ASC, title ASC";
+                $all_sessions_result = $conn->query($all_sessions_sql);
+
+                if ($all_sessions_result && $all_sessions_result->num_rows > 0):
+                    // Group sessions by year
+                    $sessions_by_year_all = [];
+                    while ($session = $all_sessions_result->fetch_assoc()) {
+                        $sessions_by_year_all[$session['year']][] = $session;
+                    }
+
+                    foreach ($sessions_by_year_all as $year => $year_sessions):
+                        ?>
+                        <div class="year-section" style="margin-bottom: 40px;">
+                            <h3 class="year-title" style="color: #7c3aed; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #f0f4ff; font-size: 22px; font-weight: 700;">
+                                <i class="fas fa-graduation-cap"></i> Year <?php echo $year; ?> Sessions
+                            </h3>
+
+                            <div class="sessions-grid">
+                                <?php foreach ($year_sessions as $session):
+                                    // Check if student is already registered
+                                    $is_registered = false;
+                                    foreach ($registered_sessions as $registered) {
+                                        if ($registered['id'] == $session['id']) {
+                                            $is_registered = true;
+                                            break;
+                                        }
+                                    }
+                                    ?>
+                                    <div class="session-card" style="background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.3s; display: flex; flex-direction: column; height: 100%; border: 1px solid #e5e7eb;">
+                                        <div class="session-card-header" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; padding: 24px;">
+                                            <h4 style="margin: 0 0 12px 0; line-height: 1.4; color: white; font-size: 18px; font-weight: 700;">
+                                                <?php echo htmlspecialchars($session['title'] ?? $session['topic']); ?>
+                                            </h4>
+                                            <span style="display: inline-block; background: rgba(255, 255, 255, 0.25); padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: white;">
+                                                Year <?php echo htmlspecialchars($session['year']); ?>
+                                            </span>
+                                        </div>
+
+                                        <div class="session-card-body" style="padding: 24px; flex-grow: 1; display: flex; flex-direction: column;">
+                                            <?php if ($session['description']): ?>
+                                                <p style="color: #6b7280; font-size: 14px; margin-bottom: 16px; flex-grow: 1; line-height: 1.6;">
+                                                    <?php echo htmlspecialchars($session['description']); ?>
+                                                </p>
+                                            <?php endif; ?>
+
+                                            <?php if ($is_registered): ?>
+                                                <div style="padding: 12px; background: #d1fae5; border-radius: 8px; margin-bottom: 16px; text-align: center;">
+                                                    <span style="color: #065f46; font-weight: 600; font-size: 14px;">
+                                                        <i class="fas fa-check-circle"></i> Already Registered
+                                                    </span>
+                                                </div>
+                                                <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="quiz-button" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; text-align: center; transition: all 0.3s;">
+                                                    <i class="fas fa-play"></i> Take Quiz
+                                                </a>
+                                            <?php else: ?>
+                                                <form method="POST" action="" style="display: flex; gap: 10px;">
+                                                    <input type="hidden" name="session_id" value="<?php echo $session['id']; ?>">
+                                                    <button type="submit" name="register_session" class="btn btn-success" style="background: #10b981; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; flex: 1; transition: all 0.3s;">
+                                                        <i class="fas fa-plus"></i> Get Registered
+                                                    </button>
+                                                </form>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="empty-state" style="text-align: center; padding: 60px 24px; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
+                        <div class="empty-state-icon" style="font-size: 64px; color: #9ca3af; margin-bottom: 24px; opacity: 0.6;">
+                            <i class="fas fa-inbox"></i>
+                        </div>
+                        <h3 style="font-size: 24px; color: #1f2937; margin-bottom: 12px; font-weight: 600;">No Sessions Available</h3>
+                        <p style="color: #6b7280; font-size: 16px; margin: 0; line-height: 1.6;">
+                            There are no sessions available at the moment. Please check back later!
+                        </p>
+                    </div>
+                <?php endif; ?>
+
+                <?php
+            } elseif ($view == 'view_registered_sessions') {
+                // View Registered Sessions - Show only sessions student is registered for
+                ?>
+                <div class="welcome-header">
+                    <h1><i class="fas fa-check-circle"></i> Your Registered Sessions</h1>
+                    <p>Here are all the sessions you have registered for. Click "Take Quiz" to participate.</p>
+
+                    <div class="student-info-grid">
+                        <div class="info-badge">
+                            <strong>Total Registered:</strong> <?php echo count($registered_sessions); ?>
+                        </div>
+                        <div class="info-badge">
+                            <strong>Completed:</strong> <?php echo count(array_filter($registered_sessions, function($s) { return $s['registration_status'] === 'completed'; })); ?>
+                        </div>
+                        <div class="info-badge">
+                            <strong>In Progress:</strong> <?php echo count(array_filter($registered_sessions, function($s) { return $s['registration_status'] === 'registered'; })); ?>
+                        </div>
+                    </div>
+                </div>
+
+                <?php if (!empty($sessions_by_year)): ?>
+                    <?php foreach ($sessions_by_year as $year => $year_sessions): ?>
+                        <div class="year-section" style="margin-bottom: 40px;">
+                            <h3 class="year-title" style="color: #7c3aed; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #f0f4ff; font-size: 22px; font-weight: 700;">
+                                <i class="fas fa-graduation-cap"></i> Year <?php echo $year; ?> Sessions
+                            </h3>
+
+                            <div class="sessions-grid">
+                                <?php foreach ($year_sessions as $session): ?>
+                                    <div class="session-card" style="background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.3s; display: flex; flex-direction: column; height: 100%; border: 1px solid #e5e7eb;">
+                                        <div class="session-card-header" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; padding: 24px;">
+                                            <h4 style="margin: 0 0 12px 0; line-height: 1.4; color: white; font-size: 18px; font-weight: 700;">
+                                                <?php echo htmlspecialchars($session['title']); ?>
+                                            </h4>
+                                            <span style="display: inline-block; background: rgba(255, 255, 255, 0.25); padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: white;">
+                                                Year <?php echo htmlspecialchars($session['year']); ?>
+                                            </span>
+                                        </div>
+
+                                        <div class="session-card-body" style="padding: 24px; flex-grow: 1; display: flex; flex-direction: column;">
+                                            <div style="margin-bottom: 16px;">
+                                                <span style="padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+                                                    <?php
+                                                    switch($session['registration_status']) {
+                                                        case 'completed': echo 'background: #d1fae5; color: #065f46;'; break;
+                                                        case 'registered': echo 'background: #dbeafe; color: #1e40af;'; break;
+                                                        default: echo 'background: #f3f4f6; color: #374151;';
+                                                    }
+                                                    ?>">
+                                                    <?php echo ucfirst($session['registration_status']); ?>
+                                                </span>
+                                            </div>
+
+                                            <p style="color: #6b7280; font-size: 14px; margin-bottom: 16px; flex-grow: 1;">
+                                                Registered on: <?php echo date('M j, Y', strtotime($session['registered_at'])); ?>
+                                            </p>
+
+                                            <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="quiz-button" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; text-align: center; transition: all 0.3s;">
+                                                <i class="fas fa-play"></i> Take Quiz
+                                            </a>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="alert alert-info" style="padding: 24px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 12px; color: #1e40af; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <i class="fas fa-info-circle"></i> You haven't registered for any sessions yet. Visit "View All Sessions" to register for sessions!
+                    </div>
+                <?php endif; ?>
+
+            <?php
+            } elseif ($view == 'suggest_session') {
+                // Suggest a Session - Same form as main website
+                $suggest_message = '';
+                $suggest_message_type = '';
+
+                if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['suggest_session_submit'])) {
+                    $name = trim($_POST['name'] ?? '');
+                    $roll_number = trim($_POST['roll_number'] ?? '');
+                    $year = $_POST['year'] ?? '';
+                    $branch = trim($_POST['branch'] ?? '');
+                    $section = trim($_POST['section'] ?? '');
+                    $session_desired = trim($_POST['session_desired'] ?? '');
+                    $other_query = trim($_POST['other_query'] ?? '');
+
+                    // Validation
+                    if (empty($name) || empty($roll_number) || empty($year) || empty($branch) || empty($section) || empty($session_desired)) {
+                        $suggest_message = 'All required fields must be filled.';
+                        $suggest_message_type = 'danger';
+                    } else {
+                        // Insert into database
+                        $insert_sql = "INSERT INTO iap_session_suggestions (name, roll_number, year, branch, section, session_desired, other_query, status) 
+                                      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')";
+                        $insert_stmt = $conn->prepare($insert_sql);
+                        
+                        if ($insert_stmt) {
+                            $insert_stmt->bind_param("sssssss", $name, $roll_number, $year, $branch, $section, $session_desired, $other_query);
+                            
+                            if ($insert_stmt->execute()) {
+                                $suggest_message = 'Thank you for your session suggestion! We\'ll review it and get back to you soon.';
+                                $suggest_message_type = 'success';
+                                // Clear form
+                                $_POST = [];
+                            } else {
+                                $suggest_message = 'Error submitting suggestion. Please try again.';
+                                $suggest_message_type = 'danger';
+                            }
+                            $insert_stmt->close();
+                        } else {
+                            $suggest_message = 'Database error. Please try again.';
+                            $suggest_message_type = 'danger';
+                        }
+                    }
+                }
+                ?>
+
+                <div class="welcome-header">
+                    <h1><i class="fas fa-lightbulb"></i> Suggest a Session</h1>
+                    <p>Have an idea for a session that would help you and your peers? Share your suggestion with us!</p>
+                </div>
+
+                <div class="suggest-session-container" style="background: white; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 32px; margin-bottom: 32px;">
+                    <?php if (!empty($suggest_message)): ?>
+                        <div class="alert alert-<?php echo $suggest_message_type; ?> alert-dismissible fade show" role="alert">
+                            <i class="fas fa-<?php echo $suggest_message_type === 'success' ? 'check-circle' : 'exclamation-circle'; ?>"></i>
+                            <?php echo htmlspecialchars($suggest_message); ?>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    <?php endif; ?>
+
+                    <form method="POST" action="?view=suggest_session" id="suggestSessionForm">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="suggest_name" class="form-label">Name <span style="color: #ef4444;">*</span></label>
+                                <input type="text" class="form-control" id="suggest_name" name="name" value="<?php echo htmlspecialchars($_POST['name'] ?? $_SESSION['full_name']); ?>" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="suggest_roll_number" class="form-label">Roll Number <span style="color: #ef4444;">*</span></label>
+                                <input type="text" class="form-control" id="suggest_roll_number" name="roll_number" value="<?php echo htmlspecialchars($_POST['roll_number'] ?? $_SESSION['roll_number']); ?>" required>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="suggest_year" class="form-label">Year <span style="color: #ef4444;">*</span></label>
+                                <select class="form-control" id="suggest_year" name="year" required>
+                                    <option value="">-- Select Year --</option>
+                                    <option value="1" <?php echo ($_POST['year'] ?? $_SESSION['year']) == '1' ? 'selected' : ''; ?>>Year 1</option>
+                                    <option value="2" <?php echo ($_POST['year'] ?? $_SESSION['year']) == '2' ? 'selected' : ''; ?>>Year 2</option>
+                                    <option value="3" <?php echo ($_POST['year'] ?? $_SESSION['year']) == '3' ? 'selected' : ''; ?>>Year 3</option>
+                                    <option value="4" <?php echo ($_POST['year'] ?? $_SESSION['year']) == '4' ? 'selected' : ''; ?>>Year 4</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="suggest_branch" class="form-label">Branch/Department <span style="color: #ef4444;">*</span></label>
+                                <input type="text" class="form-control" id="suggest_branch" name="branch" value="<?php echo htmlspecialchars($_POST['branch'] ?? $_SESSION['department']); ?>" required>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="suggest_section" class="form-label">Section <span style="color: #ef4444;">*</span></label>
+                                <input type="text" class="form-control" id="suggest_section" name="section" placeholder="e.g., A, B, C" value="<?php echo htmlspecialchars($_POST['section'] ?? ''); ?>" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="suggest_session_desired" class="form-label">Session You Want <span style="color: #ef4444;">*</span></label>
+                                <input type="text" class="form-control" id="suggest_session_desired" name="session_desired" placeholder="e.g., Advanced Machine Learning, Web Development Workshop" value="<?php echo htmlspecialchars($_POST['session_desired'] ?? ''); ?>" required>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="suggest_other_query" class="form-label">Any Other Query/Suggestion</label>
+                            <textarea class="form-control" id="suggest_other_query" name="other_query" rows="4" placeholder="Tell us more about your session idea..."><?php echo htmlspecialchars($_POST['other_query'] ?? ''); ?></textarea>
+                            <div class="form-text">Optional - Provide additional details about your suggestion</div>
+                        </div>
+
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> <strong>Note:</strong> Your suggestion will be reviewed by our team. We appreciate your input in helping us improve the IAP program!
+                        </div>
+
+                        <div class="d-flex gap-3">
+                            <button type="submit" name="suggest_session_submit" class="btn btn-primary" style="background: #7c3aed; border: none; padding: 12px 24px;">
+                                <i class="fas fa-paper-plane"></i> Submit Suggestion
+                            </button>
+                            <button type="reset" class="btn btn-secondary" style="padding: 12px 24px;">
+                                <i class="fas fa-redo"></i> Clear Form
+                            </button>
+                        </div>
+                    </form>
                 </div>
 
                 <?php

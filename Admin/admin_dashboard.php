@@ -129,32 +129,61 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_session'])) {
     $stmt->close();
 }
 
-// Handle status update for session requests
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['request_id']) && isset($_POST['new_status'])) {
+// Handle approve action for session requests
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['approve_request'])) {
     $request_id = intval($_POST['request_id']);
-    $new_status = $_POST['new_status'];
+    
+    $sql = "UPDATE iap_session_suggestions SET status = 'approved' WHERE id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $request_id);
 
-    $valid_statuses = ['pending', 'reviewed', 'approved', 'rejected'];
-    if (in_array($new_status, $valid_statuses)) {
-        $sql = "UPDATE iap_session_suggestions SET status = ? WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("si", $new_status, $request_id);
-
-        if ($stmt->execute()) {
-            $message = "Status updated successfully!";
-        } else {
-            $message = "Error updating status: " . $conn->error;
-        }
-        $stmt->close();
+    if ($stmt->execute()) {
+        $message = "Session request approved successfully!";
+    } else {
+        $message = "Error approving request: " . $conn->error;
     }
+    $stmt->close();
+}
+
+// Handle reject action for session requests
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['reject_request'])) {
+    $request_id = intval($_POST['request_id']);
+    
+    $sql = "UPDATE iap_session_suggestions SET status = 'rejected' WHERE id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $request_id);
+
+    if ($stmt->execute()) {
+        $message = "Session request rejected successfully!";
+    } else {
+        $message = "Error rejecting request: " . $conn->error;
+    }
+    $stmt->close();
 }
 
 if ($page == 'requests') {
-    $sql = "SELECT * FROM iap_session_suggestions ORDER BY submitted_at DESC";
-    $result = $conn->query($sql);
+    // Fetch pending requests
+    $sql_pending = "SELECT * FROM iap_session_suggestions WHERE status = 'pending' ORDER BY submitted_at DESC";
+    $pending_result = $conn->query($sql_pending);
 
-    if (!$result) {
-        die("MySQL Error fetching session suggestions: " . $conn->error);
+    if (!$pending_result) {
+        die("MySQL Error fetching pending session suggestions: " . $conn->error);
+    }
+
+    // Fetch approved requests
+    $sql_approved = "SELECT * FROM iap_session_suggestions WHERE status = 'approved' ORDER BY submitted_at DESC";
+    $approved_result = $conn->query($sql_approved);
+
+    if (!$approved_result) {
+        die("MySQL Error fetching approved session suggestions: " . $conn->error);
+    }
+
+    // Fetch rejected requests
+    $sql_rejected = "SELECT * FROM iap_session_suggestions WHERE status = 'rejected' ORDER BY submitted_at DESC";
+    $rejected_result = $conn->query($sql_rejected);
+
+    if (!$rejected_result) {
+        die("MySQL Error fetching rejected session suggestions: " . $conn->error);
     }
 
 } else if ($page == 'registered_students') {
@@ -646,6 +675,26 @@ if ($page == 'requests') {
                 }
 
                 $psychometric_completion_rate = $total_students > 0 ? round(($psychometric_completed / $total_students) * 100, 1) : 0;
+
+                // Fetch session request statistics
+                $pending_requests = 0;
+                $approved_requests = 0;
+                $rejected_requests = 0;
+
+                $pending_requests_result = $conn->query("SELECT COUNT(*) as count FROM iap_session_suggestions WHERE status = 'pending'");
+                if ($pending_requests_result) {
+                    $pending_requests = $pending_requests_result->fetch_assoc()['count'] ?? 0;
+                }
+
+                $approved_requests_result = $conn->query("SELECT COUNT(*) as count FROM iap_session_suggestions WHERE status = 'approved'");
+                if ($approved_requests_result) {
+                    $approved_requests = $approved_requests_result->fetch_assoc()['count'] ?? 0;
+                }
+
+                $rejected_requests_result = $conn->query("SELECT COUNT(*) as count FROM iap_session_suggestions WHERE status = 'rejected'");
+                if ($rejected_requests_result) {
+                    $rejected_requests = $rejected_requests_result->fetch_assoc()['count'] ?? 0;
+                }
                 ?>
 
                 <!-- Statistics Cards -->
@@ -687,6 +736,37 @@ if ($page == 'requests') {
                         <div class="stat-content">
                             <div class="stat-number"><?php echo number_format($total_quizzes); ?></div>
                             <div class="stat-label">Total Quizzes Taken</div>
+                        </div>
+                    </div>
+
+                    <!-- Session Request Statistics -->
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: linear-gradient(135deg, #fef3c7, #fde68a); color: #f59e0b;">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number"><?php echo number_format($pending_requests); ?></div>
+                            <div class="stat-label">Pending Session Requests</div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); color: #10b981;">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number"><?php echo number_format($approved_requests); ?></div>
+                            <div class="stat-label">Approved Session Requests</div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: linear-gradient(135deg, #fee2e2, #fecaca); color: #ef4444;">
+                            <i class="fas fa-times-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number"><?php echo number_format($rejected_requests); ?></div>
+                            <div class="stat-label">Rejected Session Requests</div>
                         </div>
                     </div>
 
@@ -799,68 +879,158 @@ if ($page == 'requests') {
 
             <?php elseif ($page == 'requests'): ?>
                 <h2 class="section-title">Session Requests & Suggestions</h2>
-                <?php if ($result && $result->num_rows > 0): ?>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Name</th>
-                                <th>Roll Number</th>
-                                <th>Year</th>
-                                <th>Branch</th>
-                                <th>Section</th>
-                                <th>Session Desired</th>
-                                <th>Other Query</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                                <th>Submitted At</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php while($row = $result->fetch_assoc()): ?>
+                
+                <!-- Pending Requests Section -->
+                <div style="margin-bottom: 50px;">
+                    <h3 style="color: #f59e0b; margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-radius: 12px; border-left: 4px solid #f59e0b;">
+                        <i class="fas fa-clock"></i> Pending Session Requests
+                    </h3>
+                    <?php if ($pending_result && $pending_result->num_rows > 0): ?>
+                        <table>
+                            <thead>
                                 <tr>
-                                    <td><?php echo $row['id']; ?></td>
-                                    <td><?php echo htmlspecialchars($row['name']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['roll_number']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['year']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['branch']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['section']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['session_desired']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['other_query']); ?></td>
-                                    <td>
-                                        <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;
-                                            <?php
-                                            switch($row['status']) {
-                                                case 'pending': echo 'background: #fef3c7; color: #92400e;'; break;
-                                                case 'reviewed': echo 'background: #dbeafe; color: #1e40af;'; break;
-                                                case 'approved': echo 'background: #d1fae5; color: #065f46;'; break;
-                                                case 'rejected': echo 'background: #fee2e2; color: #991b1b;'; break;
-                                                default: echo 'background: #f3f4f6; color: #374151;';
-                                            }
-                                            ?>">
-                                            <?php echo ucfirst($row['status']); ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <form method="post" action="" style="display: inline;">
-                                            <input type="hidden" name="request_id" value="<?php echo $row['id']; ?>">
-                                            <select name="new_status" onchange="this.form.submit()" style="padding: 4px; border-radius: 4px; border: 1px solid #d1d5db;">
-                                                <option value="">Change Status</option>
-                                                <option value="pending">Pending</option>
-                                                <option value="reviewed">Reviewed</option>
-                                                <option value="approved">Approved</option>
-                                                <option value="rejected">Rejected</option>
-                                            </select>
-                                        </form>
-                                    </td>
-                                    <td><?php echo htmlspecialchars($row['submitted_at']); ?></td>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Roll Number</th>
+                                    <th>Year</th>
+                                    <th>Branch</th>
+                                    <th>Section</th>
+                                    <th>Session Desired</th>
+                                    <th>Other Query</th>
+                                    <th>Submitted At</th>
+                                    <th>Actions</th>
                                 </tr>
-                            <?php endwhile; ?>
-                        </tbody>
-                    </table>
-                <?php else: ?>
-                    <p class="no-data">No session requests yet.</p>
-                <?php endif; ?>
+                            </thead>
+                            <tbody>
+                                <?php while($row = $pending_result->fetch_assoc()): ?>
+                                    <tr>
+                                        <td><?php echo $row['id']; ?></td>
+                                        <td><?php echo htmlspecialchars($row['name']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['roll_number']); ?></td>
+                                        <td>Year <?php echo htmlspecialchars($row['year']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['branch']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['section']); ?></td>
+                                        <td><strong><?php echo htmlspecialchars($row['session_desired']); ?></strong></td>
+                                        <td><?php echo htmlspecialchars($row['other_query'] ?: 'N/A'); ?></td>
+                                        <td><?php echo date('M j, Y H:i', strtotime($row['submitted_at'])); ?></td>
+                                        <td>
+                                            <div style="display: flex; gap: 8px;">
+                                                <form method="post" action="" style="display: inline;">
+                                                    <input type="hidden" name="request_id" value="<?php echo $row['id']; ?>">
+                                                    <button type="submit" name="approve_request" style="background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; transition: all 0.3s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+                                                        <i class="fas fa-check"></i> Approve
+                                                    </button>
+                                                </form>
+                                                <form method="post" action="" style="display: inline;">
+                                                    <input type="hidden" name="request_id" value="<?php echo $row['id']; ?>">
+                                                    <button type="submit" name="reject_request" style="background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; transition: all 0.3s;" onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">
+                                                        <i class="fas fa-times"></i> Reject
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            </tbody>
+                        </table>
+                    <?php else: ?>
+                        <p class="no-data">No pending session requests.</p>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Approved Requests Section -->
+                <div style="margin-bottom: 50px;">
+                    <h3 style="color: #10b981; margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-radius: 12px; border-left: 4px solid #10b981;">
+                        <i class="fas fa-check-circle"></i> Approved Session Requests
+                    </h3>
+                    <?php if ($approved_result && $approved_result->num_rows > 0): ?>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Roll Number</th>
+                                    <th>Year</th>
+                                    <th>Branch</th>
+                                    <th>Section</th>
+                                    <th>Session Desired</th>
+                                    <th>Other Query</th>
+                                    <th>Submitted At</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php while($row = $approved_result->fetch_assoc()): ?>
+                                    <tr style="background: #f0fdf4;">
+                                        <td><?php echo $row['id']; ?></td>
+                                        <td><?php echo htmlspecialchars($row['name']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['roll_number']); ?></td>
+                                        <td>Year <?php echo htmlspecialchars($row['year']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['branch']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['section']); ?></td>
+                                        <td><strong><?php echo htmlspecialchars($row['session_desired']); ?></strong></td>
+                                        <td><?php echo htmlspecialchars($row['other_query'] ?: 'N/A'); ?></td>
+                                        <td><?php echo date('M j, Y H:i', strtotime($row['submitted_at'])); ?></td>
+                                        <td>
+                                            <span style="padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; background: #d1fae5; color: #065f46;">
+                                                <i class="fas fa-check-circle"></i> Approved
+                                            </span>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            </tbody>
+                        </table>
+                    <?php else: ?>
+                        <p class="no-data">No approved session requests yet.</p>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Rejected Requests Section -->
+                <div style="margin-bottom: 50px;">
+                    <h3 style="color: #ef4444; margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-radius: 12px; border-left: 4px solid #ef4444;">
+                        <i class="fas fa-times-circle"></i> Rejected Session Requests
+                    </h3>
+                    <?php if ($rejected_result && $rejected_result->num_rows > 0): ?>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Roll Number</th>
+                                    <th>Year</th>
+                                    <th>Branch</th>
+                                    <th>Section</th>
+                                    <th>Session Desired</th>
+                                    <th>Other Query</th>
+                                    <th>Submitted At</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php while($row = $rejected_result->fetch_assoc()): ?>
+                                    <tr style="background: #fef2f2;">
+                                        <td><?php echo $row['id']; ?></td>
+                                        <td><?php echo htmlspecialchars($row['name']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['roll_number']); ?></td>
+                                        <td>Year <?php echo htmlspecialchars($row['year']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['branch']); ?></td>
+                                        <td><?php echo htmlspecialchars($row['section']); ?></td>
+                                        <td><strong><?php echo htmlspecialchars($row['session_desired']); ?></strong></td>
+                                        <td><?php echo htmlspecialchars($row['other_query'] ?: 'N/A'); ?></td>
+                                        <td><?php echo date('M j, Y H:i', strtotime($row['submitted_at'])); ?></td>
+                                        <td>
+                                            <span style="padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; background: #fee2e2; color: #991b1b;">
+                                                <i class="fas fa-times-circle"></i> Rejected
+                                            </span>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            </tbody>
+                        </table>
+                    <?php else: ?>
+                        <p class="no-data">No rejected session requests.</p>
+                    <?php endif; ?>
+                </div>
 
             <?php elseif ($page == 'registered_students'): ?>
                 <h2 class="section-title">Registered Students via Student Portal</h2>
