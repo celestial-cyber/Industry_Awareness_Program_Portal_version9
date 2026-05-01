@@ -12,7 +12,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     $servername = "localhost";
     $username = "root";
-    $password_db = "root@123";
+    $password_db = "";
 
     $conn = new mysqli($servername, $username, $password_db);
 
@@ -28,7 +28,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $conn->select_db("iap_portal");
 
     // Create tables if not exist
-    $sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
+    $sql = "CREATE TABLE IF NOT EXISTS iap_users_details (
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(255) NOT NULL UNIQUE,
         email VARCHAR(255) NOT NULL UNIQUE,

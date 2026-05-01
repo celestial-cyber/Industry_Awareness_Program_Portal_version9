@@ -7,7 +7,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 
 $servername = "localhost";
 $username = "root";
-$password = "root@123";
+$password = "";
 
 $conn = new mysqli($servername, $username, $password);
 
@@ -80,9 +80,26 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_students (
     roll_number VARCHAR(50) NOT NULL UNIQUE,
     department VARCHAR(100),
     year ENUM('1', '2', '3', '4'),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    password VARCHAR(255) DEFAULT '',
+    is_password_changed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );";
 $conn->query($sql);
+
+// Ensure student password columns exist for compatibility with student authentication
+$check_password_column = $conn->query("SHOW COLUMNS FROM iap_students LIKE 'password'");
+if ($check_password_column && $check_password_column->num_rows == 0) {
+    $conn->query("ALTER TABLE iap_students ADD COLUMN password VARCHAR(255) NOT NULL DEFAULT '' AFTER year");
+}
+$check_changed_column = $conn->query("SHOW COLUMNS FROM iap_students LIKE 'is_password_changed'");
+if ($check_changed_column && $check_changed_column->num_rows == 0) {
+    $conn->query("ALTER TABLE iap_students ADD COLUMN is_password_changed BOOLEAN DEFAULT FALSE AFTER password");
+}
+$check_updated_column = $conn->query("SHOW COLUMNS FROM iap_students LIKE 'updated_at'");
+if ($check_updated_column && $check_updated_column->num_rows == 0) {
+    $conn->query("ALTER TABLE iap_students ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at");
+}
 
 $sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -96,6 +113,17 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
     FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE
 );";
 $conn->query($sql);
+
+// Check if table has proper structure, recreate if missing columns
+$check_student_id = $conn->query("SHOW COLUMNS FROM iap_psychometric_scores LIKE 'student_id'");
+$check_score = $conn->query("SHOW COLUMNS FROM iap_psychometric_scores LIKE 'score'");
+
+if ((!$check_student_id || $check_student_id->num_rows == 0) ||
+    (!$check_score || $check_score->num_rows == 0)) {
+    // Table is missing required columns, drop and recreate
+    $conn->query("DROP TABLE IF EXISTS iap_psychometric_scores");
+    $conn->query($sql);
+}
 
 $sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,

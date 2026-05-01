@@ -8,6 +8,7 @@
  */
 
 session_start();
+require_once 'validation_helpers.php';
 
 // If already logged in as student, redirect to dashboard
 if (isset($_SESSION['student_id']) && isset($_SESSION['roll_number'])) {
@@ -30,8 +31,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     
     if (empty($roll_number)) {
         $validation_errors[] = "Roll number is required";
-    } elseif (!preg_match('/^[A-Za-z0-9]{3,20}$/', $roll_number)) {
-        $validation_errors[] = "Roll number must be 3-20 alphanumeric characters";
+    } elseif (!validate_roll_number($roll_number)) {
+        $validation_errors[] = "Roll number must be exactly 10 characters in format YYBK1ACCXX, for example 23BK1A66L5.";
     }
     
     if (empty($email)) {
@@ -50,8 +51,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $validation_errors[] = "Department is required";
     }
     
-    if (empty($year) || !in_array($year, ['1', '2', '3', '4'])) {
-        $validation_errors[] = "Please select a valid year (1-4)";
+    if (empty($year) || !in_array($year, ['1', '2', '3', '4', 'Graduate'])) {
+        $validation_errors[] = "Please select a valid year ";
+    }
+
+    $disclaimer_accepted = trim($_POST['disclaimer_accepted'] ?? '0');
+    if ($disclaimer_accepted !== '1') {
+        $validation_errors[] = "You must agree to the disclaimer before registering.";
     }
     
     if (!empty($validation_errors)) {
@@ -60,7 +66,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // Database connection
         $servername = "localhost";
         $db_username = "root";
-        $db_password = "root@123";
+        $db_password = ""; // XAMPP default root password is empty
         
         $conn = new mysqli($servername, $db_username, $db_password);
         
@@ -80,13 +86,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 full_name VARCHAR(255) NOT NULL,
                 email VARCHAR(255) NOT NULL UNIQUE,
                 department VARCHAR(100),
-                year ENUM('1', '2', '3', '4') NOT NULL,
+                year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
                 password VARCHAR(255) NOT NULL,
                 is_password_changed BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )";
-            
             if (!$conn->query($create_table_sql)) {
                 $error_message = "Error creating table: " . $conn->error;
             } else {
@@ -103,7 +108,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $error_message = "Error creating sessions table: " . $conn->error;
                 } else {
                     // Create iap_student_sessions table if not exists
-                    $create_iap_student_sessions_sql = "CREATE TABLE IF NOT EXISTS iap_iap_student_sessions (
+                    $create_iap_student_sessions_sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
                         id INT AUTO_INCREMENT PRIMARY KEY,
                         student_id INT NOT NULL,
                         session_id INT NOT NULL,
@@ -208,6 +213,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <title>Student Registration - IAP Portal</title>
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Bootstrap CSS for modal support -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -419,8 +426,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     </style>
 </head>
-</head>
 <body>
+    <!-- First-time registration disclaimer modal -->
+    <div class="modal fade" id="firstTimeDisclaimerModal" tabindex="-1" aria-labelledby="firstTimeDisclaimerModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title" id="firstTimeDisclaimerModalLabel">Important Registration Notice</h5>
+                </div>
+                <div class="modal-body">
+                    <p>Please enter accurate information on the registration form.</p>
+                    <p>Your data will be stored securely and treated confidentially. We use it only for portal access and student verification.</p>
+                    <p>You must agree to this notice before using the registration form.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="disclaimerDeclineBtn">I Do Not Agree</button>
+                    <button type="button" class="btn btn-primary" id="disclaimerAgreeBtn">I Agree</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <section class="hero">
         <div class="container hero-content">
             <div class="hero-text">
@@ -451,16 +477,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         </div>
                     <?php endif; ?>
 
+                    <!-- Blocked message shown until disclaimer is accepted -->
+                    <div id="disclaimerBlockedMessage" class="alert alert-danger" style="display: none;">
+                        You must agree to the disclaimer before registering.
+                    </div>
+
                     <!-- Registration Form -->
                     <?php if (empty($success_message)): ?>
-                        <form method="POST" action="">
+                        <div id="registrationFormWrapper" style="display: none;">
+                            <form id="registrationForm" method="POST" action="">
+                                <input type="hidden" id="disclaimerAccepted" name="disclaimer_accepted" value="0">
                             <!-- Full Name -->
                             <label>Full Name <span class="required">*</span></label>
                             <input type="text" name="full_name" placeholder="Enter your full name" value="<?php echo htmlspecialchars($full_name ?? ''); ?>" required>
 
                             <!-- Roll Number -->
                             <label>Roll Number <span class="required">*</span></label>
-                            <input type="text" name="roll_number" placeholder="e.g., 2021001" value="<?php echo htmlspecialchars($roll_number ?? ''); ?>" required>
+                            <input type="text" id="roll_number" name="roll_number" placeholder="e.g., 20BK1A66L1" value="<?php echo htmlspecialchars($roll_number ?? ''); ?>" required>
+                            <div id="rollNumberError" class="message message-error" style="display: none; margin-top: 10px;"></div>
 
                             <!-- Email -->
                             <label>Email Address <span class="required">*</span></label>
@@ -470,11 +504,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <label>Department <span class="required">*</span></label>
                             <select name="department" required>
                                 <option value="">-- Select Department --</option>
-                                <option value="Computer Science" <?php echo ($department ?? '') === 'Computer Science' ? 'selected' : ''; ?>>Computer Science</option>
-                                <option value="Electronics" <?php echo ($department ?? '') === 'Electronics' ? 'selected' : ''; ?>>Electronics</option>
+                                <option value="Computer Science" <?php echo ($department ?? '') === 'Computer Science' ? 'selected' : ''; ?>>CSE</option>
+                                <option value="Electronics" <?php echo ($department ?? '') === 'Electronics' ? 'selected' : ''; ?>>ECE</option>
                                 <option value="Mechanical" <?php echo ($department ?? '') === 'Mechanical' ? 'selected' : ''; ?>>Mechanical</option>
-                                <option value="Electrical" <?php echo ($department ?? '') === 'Electrical' ? 'selected' : ''; ?>>Electrical</option>
+                                <option value="Electrical" <?php echo ($department ?? '') === 'Electrical' ? 'selected' : ''; ?>>EEE</option>
                                 <option value="Civil" <?php echo ($department ?? '') === 'Civil' ? 'selected' : ''; ?>>Civil</option>
+                                <option value="AIML" <?php echo ($department ?? '') === 'AIML' ? 'selected' : ''; ?>>AIML</option>
+                                <option value="Cybersecurity" <?php echo ($department ?? '') === 'Cybersecurity' ? 'selected' : ''; ?>>Cybersecurity</option>
+                                <option value="Data Science" <?php echo ($department ?? '') === 'Data Science' ? 'selected' : ''; ?>>Data Science</option>
                                 <option value="Other" <?php echo ($department ?? '') === 'Other' ? 'selected' : ''; ?>>Other</option>
                             </select>
 
@@ -486,6 +523,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <option value="2" <?php echo ($year ?? '') === '2' ? 'selected' : ''; ?>>Year 2</option>
                                 <option value="3" <?php echo ($year ?? '') === '3' ? 'selected' : ''; ?>>Year 3</option>
                                 <option value="4" <?php echo ($year ?? '') === '4' ? 'selected' : ''; ?>>Year 4</option>
+                                <option value="Graduate" <?php echo ($year ?? '') === 'Graduate' ? 'selected' : ''; ?>>Graduate</option>
                             </select>
 
                             <!-- Submit Button -->
@@ -493,6 +531,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <i class="fas fa-user-plus"></i> Register
                             </button>
                         </form>
+                        </div>
                     <?php endif; ?>
 
                     <!-- Login Link -->
@@ -507,5 +546,107 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             </div>
         </div>
     </section>
+
+    <!-- Bootstrap JS bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="roll_validation.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Elements used to control the registration flow.
+            const registrationForm = document.getElementById('registrationForm');
+            const disclaimerHiddenField = document.getElementById('disclaimerAccepted');
+            const formWrapper = document.getElementById('registrationFormWrapper');
+            const blockedMessage = document.getElementById('disclaimerBlockedMessage');
+            const agreeBtn = document.getElementById('disclaimerAgreeBtn');
+            const declineBtn = document.getElementById('disclaimerDeclineBtn');
+            const disclaimerModalEl = document.getElementById('firstTimeDisclaimerModal');
+
+            // Create the Bootstrap modal instance.
+            const disclaimerModal = (window.bootstrap && disclaimerModalEl)
+                ? new bootstrap.Modal(disclaimerModalEl, {
+                    backdrop: 'static',
+                    keyboard: false
+                })
+                : null;
+
+            // Show the registration form and hide any blocked message.
+            function showForm() {
+                if (formWrapper) {
+                    formWrapper.style.display = 'block';
+                }
+                if (blockedMessage) {
+                    blockedMessage.style.display = 'none';
+                }
+                if (disclaimerHiddenField) {
+                    disclaimerHiddenField.value = '1';
+                }
+            }
+
+            // Hide the registration form and keep the disclaimer state unaccepted.
+            function hideForm() {
+                if (formWrapper) {
+                    formWrapper.style.display = 'none';
+                }
+                if (disclaimerHiddenField) {
+                    disclaimerHiddenField.value = '0';
+                }
+            }
+
+            // Always require the disclaimer modal on every visit to this page.
+            hideForm();
+            if (disclaimerModal) {
+                disclaimerModal.show();
+            } else if (blockedMessage) {
+                blockedMessage.style.display = 'block';
+                blockedMessage.textContent = 'Please enable JavaScript and accept the disclaimer before registering.';
+            }
+
+            if (registrationForm) {
+                // Attach roll number validation to the registration form.
+                attachRollNumberValidation(registrationForm, 'roll_number', 'rollNumberError');
+
+                // Prevent form submit if disclaimer is not accepted.
+                registrationForm.addEventListener('submit', function (event) {
+                    const currentAccepted = disclaimerHiddenField && disclaimerHiddenField.value === '1';
+                    if (!currentAccepted) {
+                        event.preventDefault();
+                        if (blockedMessage) {
+                            blockedMessage.style.display = 'block';
+                        }
+                        if (disclaimerModal) {
+                            disclaimerModal.show();
+                        }
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
+            if (agreeBtn) {
+                agreeBtn.addEventListener('click', function () {
+                    if (disclaimerHiddenField) {
+                        disclaimerHiddenField.value = '1';
+                    }
+                    if (disclaimerModal) {
+                        disclaimerModal.hide();
+                    }
+                    showForm();
+                });
+            }
+
+            if (declineBtn) {
+                declineBtn.addEventListener('click', function () {
+                    if (disclaimerModal) {
+                        disclaimerModal.hide();
+                    }
+                    hideForm();
+                    if (blockedMessage) {
+                        blockedMessage.style.display = 'block';
+                        blockedMessage.textContent = 'You must agree to the disclaimer before registering.';
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html>

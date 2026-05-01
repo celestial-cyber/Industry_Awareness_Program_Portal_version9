@@ -17,7 +17,7 @@ if (!isset($_SESSION['student_id']) || !isset($_SESSION['roll_number'])) {
 // Database connection credentials
 $servername = "localhost";
 $db_username = "root";
-$db_password = "root@123";
+$db_password = ""; // XAMPP default root password is usually empty
 $database = "iap_portal";
 
 // Create connection

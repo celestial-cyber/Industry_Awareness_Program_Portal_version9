@@ -8,6 +8,17 @@
 
 // Include session protection - must be at the top
 require_once 'Student/student_session_check.php';
+require_once 'Student/validation_helpers.php';
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+$show_disclaimer = false;
+if (empty($_SESSION['disclaimer_shown'])) {
+    $show_disclaimer = true;
+    $_SESSION['disclaimer_shown'] = true;
+}
 
 $error_message = '';
 $registered_sessions = [];
@@ -110,6 +121,9 @@ if (isset($_POST['update_profile'])) {
         $profile_message_type = 'danger';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $profile_message = 'Please enter a valid email address.';
+        $profile_message_type = 'danger';
+    } elseif (!validate_roll_number($roll_number)) {
+        $profile_message = 'Roll number must be exactly 10 characters in format 23BK1A66L5.';
         $profile_message_type = 'danger';
     } elseif (!in_array($year, ['1', '2', '3', '4'])) {
         $profile_message = 'Please select a valid year.';
@@ -968,8 +982,33 @@ if (isset($_POST['reset_password'])) {
             </a>
 
             <?php
+            // Ensure psychometric scores table exists for student dashboard access
+            $create_psychometric_scores_sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL UNIQUE,
+                score DECIMAL(5,2) NOT NULL,
+                trait_a INT,
+                trait_b INT,
+                trait_c INT,
+                trait_d INT,
+                completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE
+            )";
+            $conn->query($create_psychometric_scores_sql);
+
+            // Check if table has proper structure, recreate if missing columns
+            $check_student_id = $conn->query("SHOW COLUMNS FROM iap_psychometric_scores LIKE 'student_id'");
+            $check_score = $conn->query("SHOW COLUMNS FROM iap_psychometric_scores LIKE 'score'");
+
+            if ((!$check_student_id || $check_student_id->num_rows == 0) ||
+                (!$check_score || $check_score->num_rows == 0)) {
+                // Table is missing required columns, drop and recreate
+                $conn->query("DROP TABLE IF EXISTS iap_psychometric_scores");
+                $conn->query($create_psychometric_scores_sql);
+            }
+
             // Check if student has taken psychometric test
-            $psychometric_check_sql = "SELECT score FROM psychometric_scores WHERE student_id = ?";
+            $psychometric_check_sql = "SELECT score FROM iap_psychometric_scores WHERE student_id = ?";
             $psychometric_check_stmt = $conn->prepare($psychometric_check_sql);
             $psychometric_check_stmt->bind_param("i", $_SESSION['student_id']);
             $psychometric_check_stmt->execute();
@@ -1003,6 +1042,17 @@ if (isset($_POST['reset_password'])) {
         <div class="container-lg">
             <?php
             $view = isset($_GET['view']) ? $_GET['view'] : 'dashboard';
+            ?>
+
+            <?php if ($show_disclaimer && $view === 'dashboard'): ?>
+                <div class="alert alert-warning alert-dismissible fade show rounded-3 shadow-sm mt-4" role="alert">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Please ensure all details are filled accurately. The information provided will be kept strictly confidential.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            <?php endif; ?>
+
+            <?php
 
             // Handle session registration
             if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
@@ -1295,6 +1345,9 @@ if (isset($_POST['reset_password'])) {
                             <div class="col-md-6 mb-3">
                                 <label for="roll_number" class="form-label">Roll Number</label>
                                 <input type="text" class="form-control" id="roll_number" name="roll_number" value="<?php echo htmlspecialchars($_SESSION['roll_number']); ?>" required>
+                                <div id="profileRollNumberError" class="invalid-feedback" style="display: none;">
+                                    Roll number must be exactly 10 characters in format 23BK1A66L5.
+                                </div>
                             </div>
                             <div class="col-md-6 mb-3">
                                 <label for="department" class="form-label">Department</label>
@@ -1783,6 +1836,7 @@ if (isset($_POST['reset_password'])) {
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="Student/roll_validation.js"></script>
 
     <script>
     // Function to view session details
@@ -1946,6 +2000,7 @@ if (isset($_POST['reset_password'])) {
         // Form validation for profile update
         const profileForm = document.getElementById('profileForm');
         if (profileForm) {
+            attachRollNumberValidation(profileForm, 'roll_number', 'profileRollNumberError');
             profileForm.addEventListener('submit', function(e) {
                 const fullName = document.getElementById('full_name').value.trim();
                 const email = document.getElementById('email').value.trim();
@@ -1964,6 +2019,12 @@ if (isset($_POST['reset_password'])) {
                 if (!emailRegex.test(email)) {
                     e.preventDefault();
                     alert('Please enter a valid email address.');
+                    return false;
+                }
+
+                if (!isValidRollNumber(rollNumber)) {
+                    e.preventDefault();
+                    alert('Invalid roll number format. It must be 10 characters long and follow 23BK1A66L5.');
                     return false;
                 }
 

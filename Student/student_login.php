@@ -29,7 +29,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // Database connection
         $servername = "localhost";
         $db_username = "root";
-        $db_password = "root@123";
+        $db_password = "";
         
         $conn = new mysqli($servername, $db_username, $db_password);
         
@@ -79,6 +79,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 UNIQUE KEY unique_student_session (student_id, session_id)
             )";
             $conn->query($create_student_sessions_sql);
+
+            $create_psychometric_scores_sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL UNIQUE,
+                score DECIMAL(5,2) NOT NULL,
+                trait_a INT,
+                trait_b INT,
+                trait_c INT,
+                trait_d INT,
+                completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE
+            )";
+            $conn->query($create_psychometric_scores_sql);
+
+            // Check if table has proper structure, recreate if missing columns
+            $check_student_id = $conn->query("SHOW COLUMNS FROM iap_psychometric_scores LIKE 'student_id'");
+            $check_score = $conn->query("SHOW COLUMNS FROM iap_psychometric_scores LIKE 'score'");
+
+            if ((!$check_student_id || $check_student_id->num_rows == 0) ||
+                (!$check_score || $check_score->num_rows == 0)) {
+                // Table is missing required columns, drop and recreate
+                $conn->query("DROP TABLE IF EXISTS iap_psychometric_scores");
+                $conn->query($create_psychometric_scores_sql);
+            }
             
             // Insert sample student if table is empty (for testing)
             $check_sql = "SELECT COUNT(*) as count FROM IAP_students";

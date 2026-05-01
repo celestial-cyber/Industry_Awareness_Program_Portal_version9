@@ -19,7 +19,7 @@ $is_first_login = isset($_GET['first_login']) && $_GET['first_login'] == 1;
 
 $servername = "localhost";
 $db_username = "root";
-$db_password = "root@123";
+$db_password = "";
 
 $conn = new mysqli($servername, $db_username, $db_password, "iap_portal");
 

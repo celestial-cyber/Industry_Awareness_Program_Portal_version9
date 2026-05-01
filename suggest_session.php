@@ -2,7 +2,7 @@
 // suggest_session.php
 $servername = "localhost";
 $username = "root";
-$password = "root@123";
+$password = "";
 
 // Create connection
 $conn = new mysqli($servername, $username, $password);

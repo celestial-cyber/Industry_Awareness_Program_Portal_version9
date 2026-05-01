@@ -17,7 +17,7 @@ $session_id = intval($_POST['session_id']);
 
 $servername = "localhost";
 $username = "root";
-$password = "root@123";
+$password = "";
 
 $conn = new mysqli($servername, $username, $password);
 

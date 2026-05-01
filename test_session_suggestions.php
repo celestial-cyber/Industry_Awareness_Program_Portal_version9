@@ -6,7 +6,7 @@
 
 $servername = "localhost";
 $username = "root";
-$password = "root@123";
+$password = "";
 
 $conn = new mysqli($servername, $username, $password);
 

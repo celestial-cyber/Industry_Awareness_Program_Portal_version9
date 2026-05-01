@@ -2,7 +2,7 @@
 // register.php
 $servername = "localhost";
 $username = "root"; // adjust as needed
-$password = "root@123";
+$password = "";
 
 // Create connection
 $conn = new mysqli($servername, $username, $password);

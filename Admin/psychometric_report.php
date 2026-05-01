@@ -7,7 +7,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 
 $servername = "localhost";
 $username = "root";
-$password = "root@123";
+$password = "";
 $database = "iap_portal";
 
 $conn = new mysqli($servername, $username, $password, $database);

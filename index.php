@@ -7,7 +7,7 @@ if (isset($_GET['success'])) {
 // Fetch sessions from database
 $servername = "localhost";
 $username = "root";
-$password_db = "root@123";
+$password_db = "";
 
 $conn = new mysqli($servername, $username, $password_db);
 
