@@ -22,6 +22,19 @@ if (empty($_SESSION['disclaimer_shown'])) {
 
 $error_message = '';
 $registered_sessions = [];
+$student_year = (string)($_SESSION['year'] ?? '');
+
+/**
+ * Student year authorization for session registration.
+ * Graduate students are allowed for all session years.
+ */
+function can_register_for_session_year(string $student_year, string $session_year): bool
+{
+    if ($student_year === 'Graduate') {
+        return true;
+    }
+    return $student_year === $session_year;
+}
 
 try {
     // Fetch student's registered sessions using MySQLi prepared statement
@@ -76,29 +89,54 @@ if (isset($_GET['logout'])) {
 // Handle session registration
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
     $session_id = intval($_POST['session_id'] ?? 0);
-    
+
     if ($session_id > 0) {
-        // Check if already registered
-        $check_sql = "SELECT id FROM iap_student_sessions WHERE student_id = ? AND session_id = ?";
-        $check_stmt = $conn->prepare($check_sql);
-        $check_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
-        $check_stmt->execute();
-        $check_result = $check_stmt->get_result();
-        
-        if ($check_result->num_rows == 0) {
-            // Register for session
-            $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
+        // Fetch session year + name for server-side validation and storage.
+        $session_sql = "SELECT id, topic, year FROM sessions WHERE id = ?";
+        $session_stmt = $conn->prepare($session_sql);
+        $session_stmt->bind_param("i", $session_id);
+        $session_stmt->execute();
+        $session_result = $session_stmt->get_result();
+        $session_row = $session_result->fetch_assoc();
+        $session_stmt->close();
+
+        if (!$session_row) {
+            $error_message = "Session not found.";
+        } elseif (!can_register_for_session_year($student_year, (string)$session_row['year'])) {
+            $error_message = "You can only register for sessions of your academic year";
+        } else {
+            // Ensure supporting columns/index exist.
+            $col_session_name = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_name'");
+            if ($col_session_name && $col_session_name->num_rows === 0) {
+                $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN session_name VARCHAR(255) NULL AFTER session_id");
+            }
+            $col_session_year = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_year'");
+            if ($col_session_year && $col_session_year->num_rows === 0) {
+                $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN session_year VARCHAR(20) NULL AFTER session_name");
+            }
+            $col_registration_status = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'registration_status'");
+            if ($col_registration_status && $col_registration_status->num_rows === 0) {
+                $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN registration_status ENUM('registered','completed','dropped') DEFAULT 'registered' AFTER session_year");
+            }
+            $unique_check = $conn->query("SHOW INDEX FROM iap_student_sessions WHERE Key_name = 'unique_student_session'");
+            if ($unique_check && $unique_check->num_rows === 0) {
+                $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
+            }
+
+            // Register for session if not duplicate.
+            $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, session_name, session_year, registration_status) VALUES (?, ?, ?, ?, 'registered')";
             $register_stmt = $conn->prepare($register_sql);
-            $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
-            
+            $session_name = (string)$session_row['topic'];
+            $session_year = (string)$session_row['year'];
+            $register_stmt->bind_param("iiss", $_SESSION['student_id'], $session_id, $session_name, $session_year);
+
             if ($register_stmt->execute()) {
-                // Redirect with success message
                 header("Location: ?view=view_all_sessions&success=1");
                 exit();
             }
+            $error_message = "Already registered for this session or unable to register.";
             $register_stmt->close();
         }
-        $check_stmt->close();
     }
 }
 
@@ -715,6 +753,36 @@ if (isset($_POST['reset_password'])) {
             gap: 5px;
         }
 
+        /* Quick register context menu */
+        .quick-context-menu {
+            position: fixed;
+            z-index: 2000;
+            display: none;
+            min-width: 220px;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+            padding: 6px;
+        }
+
+        .quick-context-menu button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            text-align: left;
+            padding: 10px 12px;
+            border-radius: 8px;
+            color: #374151;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .quick-context-menu button:hover {
+            background: #f3e8ff;
+            color: #5b21b6;
+        }
+
         .status-badge {
             display: inline-block;
             padding: 8px 14px;
@@ -1205,7 +1273,7 @@ if (isset($_POST['reset_password'])) {
                                         </div>
 
                                         <div class="session-actions" style="display: flex; gap: 10px;">
-                                            <button onclick="viewSessionDetail(<?php echo $session['id']; ?>, '<?php echo htmlspecialchars($session['title']); ?>')" class="btn btn-outline-primary btn-sm" style="flex: 1; padding: 8px; border: 1px solid #7c3aed; color: #7c3aed; border-radius: 6px; background: transparent; cursor: pointer;">
+                                            <button onclick="viewSessionDetail(<?php echo $session['id']; ?>, '<?php echo htmlspecialchars($session['title']); ?>', '<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>')" class="btn btn-outline-primary btn-sm" style="flex: 1; padding: 8px; border: 1px solid #7c3aed; color: #7c3aed; border-radius: 6px; background: transparent; cursor: pointer;">
                                                 <i class="fas fa-info-circle"></i> View Details
                                             </button>
 
@@ -1214,7 +1282,7 @@ if (isset($_POST['reset_password'])) {
                                                     <i class="fas fa-play"></i> Take Quiz
                                                 </a>
                                             <?php else: ?>
-                                                <button onclick="registerForSession(<?php echo $session['id']; ?>, '<?php echo htmlspecialchars($session['title']); ?>')" class="btn btn-success btn-sm" style="flex: 1; padding: 8px; background: #10b981; color: white; border-radius: 6px; border: none; cursor: pointer;">
+                                                <button onclick="registerForSession(<?php echo $session['id']; ?>, '<?php echo htmlspecialchars($session['title']); ?>', '<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>')" class="btn btn-success btn-sm" style="flex: 1; padding: 8px; background: #10b981; color: white; border-radius: 6px; border: none; cursor: pointer;">
                                                     <i class="fas fa-plus"></i> Register
                                                 </button>
                                             <?php endif; ?>
@@ -1528,6 +1596,12 @@ if (isset($_POST['reset_password'])) {
                         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                     </div>
                 <?php endif; ?>
+                <?php if (!empty($error_message)): ?>
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($error_message); ?>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                <?php endif; ?>
 
                 <?php
                 // Fetch all sessions grouped by year
@@ -1559,7 +1633,11 @@ if (isset($_POST['reset_password'])) {
                                         }
                                     }
                                     ?>
-                                    <div class="session-card" style="background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.3s; display: flex; flex-direction: column; height: 100%; border: 1px solid #e5e7eb;">
+                                    <div class="session-card quick-register-card"
+                                         data-session-id="<?php echo (int)$session['id']; ?>"
+                                         data-session-title="<?php echo htmlspecialchars($session['title'] ?? $session['topic'], ENT_QUOTES); ?>"
+                                         data-session-year="<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>"
+                                         style="background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.3s; display: flex; flex-direction: column; height: 100%; border: 1px solid #e5e7eb;">
                                         <div class="session-card-header" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; padding: 24px;">
                                             <h4 style="margin: 0 0 12px 0; line-height: 1.4; color: white; font-size: 18px; font-weight: 700;">
                                                 <?php echo htmlspecialchars($session['title'] ?? $session['topic']); ?>
@@ -1586,12 +1664,24 @@ if (isset($_POST['reset_password'])) {
                                                     <i class="fas fa-play"></i> Take Quiz
                                                 </a>
                                             <?php else: ?>
-                                                <form method="POST" action="" style="display: flex; gap: 10px;">
-                                                    <input type="hidden" name="session_id" value="<?php echo $session['id']; ?>">
-                                                    <button type="submit" name="register_session" class="btn btn-success" style="background: #10b981; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; flex: 1; transition: all 0.3s;">
-                                                        <i class="fas fa-plus"></i> Get Registered
+                                                <div style="display: flex; gap: 10px;">
+                                                    <button type="button"
+                                                            class="btn btn-success quick-register-btn"
+                                                            data-session-id="<?php echo (int)$session['id']; ?>"
+                                                            data-session-title="<?php echo htmlspecialchars($session['title'] ?? $session['topic'], ENT_QUOTES); ?>"
+                                                            data-session-year="<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>"
+                                                            style="background: #10b981; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; flex: 1; transition: all 0.3s;">
+                                                        <i class="fas fa-plus"></i> Register
                                                     </button>
-                                                </form>
+                                                    <button type="button"
+                                                            class="btn btn-outline-primary quick-register-btn"
+                                                            data-session-id="<?php echo (int)$session['id']; ?>"
+                                                            data-session-title="<?php echo htmlspecialchars($session['title'] ?? $session['topic'], ENT_QUOTES); ?>"
+                                                            data-session-year="<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>"
+                                                            style="padding: 12px 14px; border-radius: 8px;">
+                                                        <i class="fas fa-user-plus"></i>
+                                                    </button>
+                                                </div>
                                             <?php endif; ?>
                                         </div>
                                     </div>
@@ -1815,6 +1905,10 @@ if (isset($_POST['reset_password'])) {
         </div>
     </div>
 
+    <div id="sessionContextMenu" class="quick-context-menu">
+        <button type="button" id="contextRegisterBtn"><i class="fas fa-user-plus"></i> Register for this Session</button>
+    </div>
+
     <!-- Session Registration Modal -->
     <div id="sessionModal" class="modal fade" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -1840,7 +1934,7 @@ if (isset($_POST['reset_password'])) {
 
     <script>
     // Function to view session details
-    function viewSessionDetail(sessionId, sessionTitle) {
+    function viewSessionDetail(sessionId, sessionTitle, sessionYear) {
         // For now, show basic info. In a real app, this would fetch from server
         const modalBody = document.getElementById('sessionModalBody');
         const modalTitle = document.getElementById('sessionModalTitle');
@@ -1853,6 +1947,7 @@ if (isset($_POST['reset_password'])) {
                 <h4>${sessionTitle}</h4>
             </div>
             <p><strong>Session ID:</strong> ${sessionId}</p>
+            <p><strong>Session Year:</strong> ${sessionYear || 'N/A'}</p>
             <p><strong>Description:</strong> This session covers important topics related to Industry Awareness Program. Please register to access detailed content and quizzes.</p>
             <div class="alert alert-info">
                 <i class="fas fa-lightbulb"></i> <strong>Tip:</strong> Register for this session to unlock quizzes and track your progress!
@@ -1861,15 +1956,30 @@ if (isset($_POST['reset_password'])) {
 
         registerBtn.style.display = 'inline-block';
         registerBtn.onclick = function() {
-            registerForSession(sessionId, sessionTitle);
+            registerForSession(sessionId, sessionTitle, sessionYear);
         };
 
         const modal = new bootstrap.Modal(document.getElementById('sessionModal'));
         modal.show();
     }
 
+    const loggedInStudentYear = <?php echo json_encode((string)$student_year); ?>;
+
+    function canStudentRegisterForYear(sessionYear) {
+        // Graduate can register for all years; others only for matching year.
+        if (loggedInStudentYear === 'Graduate') {
+            return true;
+        }
+        return String(loggedInStudentYear) === String(sessionYear);
+    }
+
     // Function to register for a session
-    function registerForSession(sessionId, sessionTitle) {
+    function registerForSession(sessionId, sessionTitle, sessionYear) {
+        if (sessionYear && !canStudentRegisterForYear(sessionYear)) {
+            alert('You can only register for sessions of your academic year');
+            return;
+        }
+
         if (confirm(`Are you sure you want to register for "${sessionTitle}"?`)) {
             // Send registration request
             fetch('session_registration.php', {
@@ -1944,6 +2054,59 @@ if (isset($_POST['reset_password'])) {
 
     // Initialize password strength checker for reset password form
     document.addEventListener('DOMContentLoaded', function() {
+        // Quick register from visible card buttons.
+        const quickRegisterButtons = document.querySelectorAll('.quick-register-btn');
+        quickRegisterButtons.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const sessionId = parseInt(btn.dataset.sessionId || '0', 10);
+                const sessionTitle = btn.dataset.sessionTitle || 'Session';
+                const sessionYear = btn.dataset.sessionYear || '';
+                registerForSession(sessionId, sessionTitle, sessionYear);
+            });
+        });
+
+        // Right-click custom context menu for desktop users.
+        const contextMenu = document.getElementById('sessionContextMenu');
+        const contextRegisterBtn = document.getElementById('contextRegisterBtn');
+        let contextSession = null;
+
+        document.querySelectorAll('.quick-register-card').forEach(function (card) {
+            card.addEventListener('contextmenu', function (event) {
+                const registerBtn = card.querySelector('.quick-register-btn');
+                if (!registerBtn) {
+                    return;
+                }
+                event.preventDefault();
+                contextSession = {
+                    id: parseInt(card.dataset.sessionId || '0', 10),
+                    title: card.dataset.sessionTitle || 'Session',
+                    year: card.dataset.sessionYear || ''
+                };
+                if (contextMenu) {
+                    contextMenu.style.display = 'block';
+                    contextMenu.style.left = `${event.clientX}px`;
+                    contextMenu.style.top = `${event.clientY}px`;
+                }
+            });
+        });
+
+        if (contextRegisterBtn) {
+            contextRegisterBtn.addEventListener('click', function () {
+                if (contextSession) {
+                    registerForSession(contextSession.id, contextSession.title, contextSession.year);
+                }
+                if (contextMenu) {
+                    contextMenu.style.display = 'none';
+                }
+            });
+        }
+
+        document.addEventListener('click', function () {
+            if (contextMenu) {
+                contextMenu.style.display = 'none';
+            }
+        });
+
         const newPasswordInput = document.getElementById('new_password');
         if (newPasswordInput) {
             newPasswordInput.addEventListener('input', function() {

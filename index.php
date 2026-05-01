@@ -35,7 +35,7 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_session_registrations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     roll_number VARCHAR(50) NOT NULL,
-    year ENUM('1', '2', '3', '4') NOT NULL,
+    year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
     department VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL,
     session_desired VARCHAR(255) NOT NULL,
@@ -47,7 +47,7 @@ $conn->query($sql);
 $sql = "CREATE TABLE IF NOT EXISTS sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     topic VARCHAR(255) NOT NULL,
-    year ENUM('1', '2', '3', '4') NOT NULL,
+    year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );";
 $conn->query($sql);
@@ -58,7 +58,7 @@ $conn->query($sql);
 
 $sessions = [];
 $sessions_with_ids = [];
-for ($year = 1; $year <= 4; $year++) {
+for ($year = 1; $year <= 5; $year++) {
     $sql = "SELECT id, topic FROM sessions WHERE year = ? ORDER BY created_at DESC";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("s", $year);
@@ -197,29 +197,32 @@ $conn->close();
 
         .hero-buttons {
             margin-top: 28px;
+            display: flex;
+            gap: 10px;
         }
 
         .primary-btn {
             background: #7c3aed;
             color: #fff;
-            border: none;
             padding: 12px 26px;
             border-radius: 10px;
             font-weight: 700;
             font-size:18px; 
             cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
         }
 
         .secondary-btn {
             background: #7c3aed;
             color: #fff;
-            border: none;
             padding: 12px 26px;
             border-radius: 10px;
             font-weight: 700;
             font-size:18px; 
-            margin-left: 10px;
             cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
         }
 
         .hero-image img {
@@ -559,12 +562,8 @@ $conn->close();
             </p>
             <div class="hero-buttons">
                 <!-- 🔗 REDIRECT FIXED -->
-                <a href="#years">
-                    <button class="primary-btn">View Year-wise Plan</button>
-                </a>
-                <a href="#about">
-                    <button class="secondary-btn">Session Registration</button>
-                </a>
+                <a href="#years" class="primary-btn">View Year-wise Plan</a>
+                <a href="#about" class="secondary-btn">Session Registration</a>
             </div>
         </div>
 
@@ -699,6 +698,7 @@ $conn->close();
                 <option value="2">Year 2</option>
                 <option value="3">Year 3</option>
                 <option value="4">Year 4</option>
+                <option value="Graduate">Graduate</option>
             </select>
 
             <label for="department">Department:</label>
@@ -748,6 +748,7 @@ $conn->close();
                     <option value="2">Year 2</option>
                     <option value="3">Year 3</option>
                     <option value="4">Year 4</option>
+                    <option value="Graduate">Graduate</option>
                 </select>
 
                 <label for="suggestion_branch">Branch/Department:</label>

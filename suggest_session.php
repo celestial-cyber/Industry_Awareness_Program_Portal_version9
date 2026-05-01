@@ -23,7 +23,7 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_session_suggestions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     roll_number VARCHAR(50) NOT NULL,
-    year ENUM('1', '2', '3', '4') NOT NULL,
+    year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
     branch VARCHAR(100) NOT NULL,
     section VARCHAR(50) NOT NULL,
     session_desired VARCHAR(255) NOT NULL,

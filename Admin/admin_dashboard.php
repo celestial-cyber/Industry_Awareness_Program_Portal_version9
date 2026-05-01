@@ -5,6 +5,12 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
+// Load Composer dependencies when available (required for PhpSpreadsheet .xlsx support).
+$composer_autoload = __DIR__ . '/../vendor/autoload.php';
+if (file_exists($composer_autoload)) {
+    require_once $composer_autoload;
+}
+
 $servername = "localhost";
 $username = "root";
 $password = "";
@@ -79,7 +85,7 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_students (
     email VARCHAR(255) NOT NULL UNIQUE,
     roll_number VARCHAR(50) NOT NULL UNIQUE,
     department VARCHAR(100),
-    year ENUM('1', '2', '3', '4'),
+    year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
     password VARCHAR(255) DEFAULT '',
     is_password_changed BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -100,6 +106,9 @@ $check_updated_column = $conn->query("SHOW COLUMNS FROM iap_students LIKE 'updat
 if ($check_updated_column && $check_updated_column->num_rows == 0) {
     $conn->query("ALTER TABLE iap_students ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at");
 }
+
+// Ensure the year enum can store Graduate values for student records.
+$conn->query("ALTER TABLE iap_students MODIFY year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL");
 
 $sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -135,12 +144,51 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
 );";
 $conn->query($sql);
 
+// Table for managing psychometric quiz questions.
+$sql = "CREATE TABLE IF NOT EXISTS psychometric_questions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    question TEXT NOT NULL,
+    option_a VARCHAR(255) NOT NULL,
+    option_b VARCHAR(255) NOT NULL,
+    option_c VARCHAR(255) NOT NULL,
+    option_d VARCHAR(255) NOT NULL,
+    correct_answer CHAR(1) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);";
+$conn->query($sql);
+// Recommended duplicate prevention on first 255 chars.
+// Add the unique index only once to avoid duplicate-key fatal errors on subsequent page loads.
+$index_check = $conn->query("SHOW INDEX FROM psychometric_questions WHERE Key_name = 'uq_psychometric_question'");
+if ($index_check && $index_check->num_rows === 0) {
+    $conn->query("ALTER TABLE psychometric_questions ADD UNIQUE KEY uq_psychometric_question (question(255))");
+}
+
 // Insert default admin if not exists
 $sql = 'INSERT IGNORE INTO iap_users_details (username, email, password, role) VALUES (\'admin\', \'admin@example.com\', \'$2y$10$xHDNFM0xYFstLYe.BIHMUu4ZxCcEeKOQ3psUy85ZcbsCqdbWUy2Z.\', \'admin\')';
 $conn->query($sql);
 
 $message = '';
 $page = isset($_GET['page']) ? $_GET['page'] : 'home';
+$valid_years = ['1', '2', '3', '4', 'Graduate'];
+$valid_departments = ['Computer Science', 'Electronics', 'Mechanical', 'Electrical', 'Civil', 'AIML', 'Cybersecurity', 'Data Science', 'Other'];
+$psychometric_upload_summary = '';
+
+$question_pattern = "/^[a-zA-Z0-9\\s\\?\\!\\,\\.\\-\\(\\)']{10,}$/";
+$option_pattern = "/^.{1,}$/";
+$answer_pattern = "/^[ABCD]$/";
+
+/**
+ * Validate psychometric question fields using required regex rules.
+ */
+function validate_psychometric_question_row($question, $a, $b, $c, $d, $answer, $question_pattern, $option_pattern, $answer_pattern): bool
+{
+    return preg_match($question_pattern, $question) === 1
+        && preg_match($option_pattern, $a) === 1
+        && preg_match($option_pattern, $b) === 1
+        && preg_match($option_pattern, $c) === 1
+        && preg_match($option_pattern, $d) === 1
+        && preg_match($answer_pattern, $answer) === 1;
+}
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_session'])) {
     $topic = $_POST['topic'];
@@ -187,6 +235,212 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['reject_request'])) {
         $message = "Error rejecting request: " . $conn->error;
     }
     $stmt->close();
+}
+
+// Handle admin student update action from the registered students section.
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_student'])) {
+    $student_id = intval($_POST['student_id'] ?? 0);
+    $full_name = trim($_POST['full_name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $roll_number = strtoupper(trim($_POST['roll_number'] ?? ''));
+    $department = trim($_POST['department'] ?? '');
+    $year = trim($_POST['year'] ?? '');
+
+    $errors = [];
+
+    if (empty($full_name) || strlen($full_name) < 2) {
+        $errors[] = 'Full name is required and must be at least 2 characters.';
+    }
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = 'A valid email address is required.';
+    }
+    if (empty($roll_number) || !preg_match('/^[0-9]{2}BK1A[A-Za-z0-9]{2}[A-Za-z0-9]{2}$/', $roll_number)) {
+        $errors[] = 'Roll number must match the format YYBK1ACCXX, for example 23BK1A66L5.';
+    }
+    if (empty($department) || !in_array($department, $valid_departments, true)) {
+        $errors[] = 'Please select a valid department.';
+    }
+    if (!in_array($year, $valid_years, true)) {
+        $errors[] = 'Please select a valid year.';
+    }
+    if ($student_id <= 0) {
+        $errors[] = 'Invalid student record.';
+    }
+
+    if (empty($errors)) {
+        // Ensure email/roll_number remain unique across other students.
+        $duplicate_sql = "SELECT id FROM iap_students WHERE (email = ? OR roll_number = ?) AND id <> ? LIMIT 1";
+        $duplicate_stmt = $conn->prepare($duplicate_sql);
+        if ($duplicate_stmt) {
+            $duplicate_stmt->bind_param("ssi", $email, $roll_number, $student_id);
+            $duplicate_stmt->execute();
+            $duplicate_result = $duplicate_stmt->get_result();
+            if ($duplicate_result && $duplicate_result->num_rows > 0) {
+                $errors[] = 'Another student already uses this email or roll number.';
+            }
+            $duplicate_stmt->close();
+        } else {
+            $errors[] = 'Database error while validating duplicate student details.';
+        }
+    }
+
+    if (empty($errors)) {
+        $sql = "UPDATE iap_students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ? WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        if ($stmt) {
+            $stmt->bind_param("sssssi", $full_name, $email, $roll_number, $department, $year, $student_id);
+            if ($stmt->execute()) {
+                $message = 'Student record updated successfully.';
+            } else {
+                $message = 'Error updating student: ' . $conn->error;
+            }
+            $stmt->close();
+        } else {
+            $message = 'Database error: ' . $conn->error;
+        }
+    } else {
+        $message = implode('<br>', $errors);
+    }
+}
+
+// Manual question entry.
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_psychometric_question'])) {
+    $question = trim($_POST['question'] ?? '');
+    $option_a = trim($_POST['option_a'] ?? '');
+    $option_b = trim($_POST['option_b'] ?? '');
+    $option_c = trim($_POST['option_c'] ?? '');
+    $option_d = trim($_POST['option_d'] ?? '');
+    $correct_answer = strtoupper(trim($_POST['correct_answer'] ?? ''));
+
+    if (!validate_psychometric_question_row($question, $option_a, $option_b, $option_c, $option_d, $correct_answer, $question_pattern, $option_pattern, $answer_pattern)) {
+        $message = "Validation failed. Ensure question/options/correct answer follow required format.";
+    } else {
+        $insert_sql = "INSERT INTO psychometric_questions (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)";
+        $insert_stmt = $conn->prepare($insert_sql);
+        if ($insert_stmt) {
+            $insert_stmt->bind_param("ssssss", $question, $option_a, $option_b, $option_c, $option_d, $correct_answer);
+            if ($insert_stmt->execute()) {
+                $message = "Psychometric question added successfully.";
+            } else {
+                $message = $conn->errno === 1062 ? "Duplicate question detected. Skipped." : ("Error adding question: " . $conn->error);
+            }
+            $insert_stmt->close();
+        } else {
+            $message = "Database error: " . $conn->error;
+        }
+    }
+}
+
+// Excel/CSV upload processing for psychometric questions.
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['upload_psychometric_file'])) {
+    $max_file_size = 2 * 1024 * 1024; // 2 MB
+    $expected_headers = ['Question', 'Option A', 'Option B', 'Option C', 'Option D', 'Correct Answer'];
+    $inserted_rows = 0;
+    $skipped_rows = 0;
+
+    if (!isset($_FILES['psychometric_file']) || $_FILES['psychometric_file']['error'] !== UPLOAD_ERR_OK) {
+        $message = "File upload failed. Please try again.";
+    } else {
+        $uploaded_file = $_FILES['psychometric_file'];
+        $file_name = $uploaded_file['name'] ?? '';
+        $tmp_path = $uploaded_file['tmp_name'] ?? '';
+        $file_size = (int)($uploaded_file['size'] ?? 0);
+        $extension = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+        $allowed_extensions = ['csv', 'xlsx'];
+        $allowed_mime_types = [
+            'csv' => ['text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel'],
+            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/octet-stream']
+        ];
+
+        if ($file_size <= 0 || $file_size > $max_file_size) {
+            $message = "Invalid file size. Maximum allowed size is 2MB.";
+        } elseif (!in_array($extension, $allowed_extensions, true)) {
+            $message = "Invalid file extension. Only .csv and .xlsx are allowed.";
+        } else {
+            $detected_mime = mime_content_type($tmp_path);
+            if (!in_array($detected_mime, $allowed_mime_types[$extension], true)) {
+                $message = "Invalid file type. MIME validation failed.";
+            } else {
+                $rows = [];
+                if ($extension === 'csv') {
+                    if (($handle = fopen($tmp_path, 'r')) !== false) {
+                        while (($data = fgetcsv($handle)) !== false) {
+                            $rows[] = $data;
+                        }
+                        fclose($handle);
+                    }
+                } else {
+                    if (!class_exists('\PhpOffice\PhpSpreadsheet\IOFactory')) {
+                        $message = "PhpSpreadsheet is required for .xlsx uploads. Install it via Composer first.";
+                    } else {
+                        try {
+                            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($tmp_path);
+                            $sheet = $spreadsheet->getActiveSheet();
+                            foreach ($sheet->toArray(null, true, true, true) as $row) {
+                                $rows[] = [
+                                    $row['A'] ?? '',
+                                    $row['B'] ?? '',
+                                    $row['C'] ?? '',
+                                    $row['D'] ?? '',
+                                    $row['E'] ?? '',
+                                    $row['F'] ?? ''
+                                ];
+                            }
+                        } catch (Exception $e) {
+                            $message = "Unable to read .xlsx file: " . $e->getMessage();
+                        }
+                    }
+                }
+
+                if (empty($message)) {
+                    if (count($rows) < 2) {
+                        $message = "Upload file has no data rows.";
+                    } else {
+                        $header_row = array_map('trim', $rows[0]);
+                        if ($header_row !== $expected_headers) {
+                            $message = "Header mismatch. Required format: Question | Option A | Option B | Option C | Option D | Correct Answer";
+                        } else {
+                            $insert_sql = "INSERT INTO psychometric_questions (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)";
+                            $insert_stmt = $conn->prepare($insert_sql);
+                            if (!$insert_stmt) {
+                                $message = "Database error: " . $conn->error;
+                            } else {
+                                for ($i = 1; $i < count($rows); $i++) {
+                                    $row = $rows[$i];
+                                    $question = trim((string)($row[0] ?? ''));
+                                    $option_a = trim((string)($row[1] ?? ''));
+                                    $option_b = trim((string)($row[2] ?? ''));
+                                    $option_c = trim((string)($row[3] ?? ''));
+                                    $option_d = trim((string)($row[4] ?? ''));
+                                    $correct_answer = strtoupper(trim((string)($row[5] ?? '')));
+
+                                    if ($question === '' || $option_a === '' || $option_b === '' || $option_c === '' || $option_d === '' || $correct_answer === '') {
+                                        $skipped_rows++;
+                                        continue;
+                                    }
+
+                                    if (!validate_psychometric_question_row($question, $option_a, $option_b, $option_c, $option_d, $correct_answer, $question_pattern, $option_pattern, $answer_pattern)) {
+                                        $skipped_rows++;
+                                        continue;
+                                    }
+
+                                    $insert_stmt->bind_param("ssssss", $question, $option_a, $option_b, $option_c, $option_d, $correct_answer);
+                                    if ($insert_stmt->execute()) {
+                                        $inserted_rows++;
+                                    } else {
+                                        $skipped_rows++;
+                                    }
+                                }
+                                $insert_stmt->close();
+                                $message = "Upload processed successfully.";
+                                $psychometric_upload_summary = "Inserted: {$inserted_rows}, Skipped: {$skipped_rows}";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 if ($page == 'requests') {
@@ -264,6 +518,8 @@ if ($page == 'requests') {
     if (!$pending_result) {
         die("MySQL Error fetching pending psychometric results: " . $conn->error);
     }
+} else if ($page == 'manage_psychometric_questions') {
+    $psychometric_questions_result = $conn->query("SELECT id, question, option_a, option_b, option_c, option_d, correct_answer, created_at FROM psychometric_questions ORDER BY id DESC LIMIT 50");
 }
 ?>
 <!DOCTYPE html>
@@ -272,6 +528,7 @@ if ($page == 'requests') {
     <meta charset="UTF-8">
     <title>Admin Dashboard - IAP Portal</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/css/adminlte.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         * {
@@ -400,6 +657,212 @@ if ($page == 'requests') {
 
         .check-report-btn i {
             font-size: 12px;
+        }
+
+        /* Edit Student Button */
+        .action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+            border: none;
+            cursor: pointer;
+        }
+
+        .action-btn:hover {
+            background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .student-name-link {
+            color: #1d4ed8;
+            background: none;
+            border: none;
+            padding: 0;
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .student-name-link:hover {
+            color: #1e3a8a;
+        }
+
+        /* Edit Student Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .modal-overlay.active {
+            display: block;
+        }
+
+        .modal-content {
+            background: #ffffff;
+            margin: 5% auto;
+            padding: 40px;
+            width: 90%;
+            max-width: 600px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 15px;
+        }
+
+        .modal-header h2 {
+            color: #5b21b6;
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            cursor: pointer;
+            color: #9ca3af;
+            font-weight: bold;
+            transition: color 0.3s;
+        }
+
+        .modal-close:hover {
+            color: #374151;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        .modal-buttons button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-save {
+            background: #10b981;
+            color: #ffffff;
+        }
+
+        .btn-save:hover {
+            background: #059669;
+        }
+
+        .btn-cancel {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .btn-cancel:hover {
+            background: #d1d5db;
+        }
+
+        .form-error {
+            display: none;
+            margin-top: 6px;
+            color: #dc2626;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        .tab-nav {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            border: 1px solid #d1d5db;
+            background: #f9fafb;
+            color: #374151;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .tab-btn.active {
+            background: #7c3aed;
+            color: #ffffff;
+            border-color: #7c3aed;
+        }
+
+        .tab-panel {
+            display: none;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .tab-panel.active {
+            display: block;
         }
 
         .section-title {
@@ -619,6 +1082,18 @@ if ($page == 'requests') {
                 grid-template-columns: 1fr;
                 gap: 16px;
             }
+
+            .modal-content {
+                margin: 10% auto;
+                padding: 20px;
+                width: 95%;
+            }
+
+            th, td {
+                padding: 10px;
+                font-size: 13px;
+                white-space: nowrap;
+            }
         }
     </style>
 </head>
@@ -641,6 +1116,7 @@ if ($page == 'requests') {
                 <li><a href="?page=requests" class="<?php echo $page == 'requests' ? 'active' : ''; ?>">View Session Requests</a></li>
                 <li><a href="?page=registered_students" class="<?php echo $page == 'registered_students' ? 'active' : ''; ?>">View Registered Students</a></li>
                 <li><a href="?page=psychometric_status" class="<?php echo $page == 'psychometric_status' ? 'active' : ''; ?>">Check Psychometric Status</a></li>
+                <li><a href="?page=manage_psychometric_questions" class="<?php echo $page == 'manage_psychometric_questions' ? 'active' : ''; ?>">Add Ques in Psychometric Quiz</a></li>
             </ul>
         </div>
 
@@ -1063,6 +1539,7 @@ if ($page == 'requests') {
             <?php elseif ($page == 'registered_students'): ?>
                 <h2 class="section-title">Registered Students via Student Portal</h2>
                 <?php if ($registered_students_result && $registered_students_result->num_rows > 0): ?>
+                    <div class="table-responsive">
                     <table>
                         <thead>
                             <tr>
@@ -1078,17 +1555,28 @@ if ($page == 'requests') {
                                 <th>Assessment Status</th>
                                 <th>Quizzes Taken</th>
                                 <th>Modules Completed</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php while($row = $registered_students_result->fetch_assoc()): ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars($row['id']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['full_name']); ?></td>
+                                    <td>
+                                        <button type="button" class="student-name-link edit-student-btn"
+                                            data-id="<?php echo htmlspecialchars($row['id']); ?>"
+                                            data-full_name="<?php echo htmlspecialchars($row['full_name'], ENT_QUOTES); ?>"
+                                            data-email="<?php echo htmlspecialchars($row['email'], ENT_QUOTES); ?>"
+                                            data-roll_number="<?php echo htmlspecialchars($row['roll_number'], ENT_QUOTES); ?>"
+                                            data-department="<?php echo htmlspecialchars($row['department'], ENT_QUOTES); ?>"
+                                            data-year="<?php echo htmlspecialchars($row['year'], ENT_QUOTES); ?>">
+                                            <?php echo htmlspecialchars($row['full_name']); ?>
+                                        </button>
+                                    </td>
                                     <td><?php echo htmlspecialchars($row['email']); ?></td>
                                     <td><?php echo htmlspecialchars($row['roll_number']); ?></td>
                                     <td><?php echo htmlspecialchars($row['department']); ?></td>
-                                    <td>Year <?php echo htmlspecialchars($row['year']); ?></td>
+                                    <td><?php echo htmlspecialchars($row['year']) === 'Graduate' ? 'Graduate' : 'Year ' . htmlspecialchars($row['year']); ?></td>
                                     <td><strong><?php echo $row['sessions_count'] ?? 0; ?></strong></td>
                                     <td>
                                         <small><?php
@@ -1117,13 +1605,193 @@ if ($page == 'requests') {
                                             <?php echo rand(0, 3); ?>
                                         </span>
                                     </td>
+                                    <td>
+                                        <button type="button" class="action-btn edit-student-btn" 
+                                            data-id="<?php echo htmlspecialchars($row['id']); ?>"
+                                            data-full_name="<?php echo htmlspecialchars($row['full_name'], ENT_QUOTES); ?>"
+                                            data-email="<?php echo htmlspecialchars($row['email'], ENT_QUOTES); ?>"
+                                            data-roll_number="<?php echo htmlspecialchars($row['roll_number'], ENT_QUOTES); ?>"
+                                            data-department="<?php echo htmlspecialchars($row['department'], ENT_QUOTES); ?>"
+                                            data-year="<?php echo htmlspecialchars($row['year'], ENT_QUOTES); ?>">
+                                            Edit
+                                        </button>
+                                    </td>
                                 </tr>
                             <?php endwhile; ?>
                         </tbody>
                     </table>
+                    </div>
                 <?php else: ?>
                     <p class="no-data">No students registered yet through the student portal.</p>
                 <?php endif; ?>
+
+                <!-- Edit Student Modal -->
+                <div id="editStudentModal" class="modal-overlay" aria-hidden="true">
+                    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="editStudentTitle">
+                        <div class="modal-header">
+                            <h2 id="editStudentTitle">Edit Student</h2>
+                            <button type="button" class="modal-close" id="closeEditStudentModal" aria-label="Close">&times;</button>
+                        </div>
+                        <form method="POST" id="editStudentForm" action="?page=registered_students">
+                            <input type="hidden" name="update_student" value="1">
+                            <input type="hidden" name="student_id" id="editStudentId">
+
+                            <div class="form-group">
+                                <label for="editFullName">Name</label>
+                                <input type="text" id="editFullName" name="full_name" minlength="2" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="editRollNumber">Roll Number</label>
+                                <input type="text" id="editRollNumber" name="roll_number" maxlength="10" required>
+                                <small id="rollNumberError" class="form-error"></small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="editYear">Year</label>
+                                <select id="editYear" name="year" required>
+                                    <option value="">-- Select Year --</option>
+                                    <option value="1">Year 1</option>
+                                    <option value="2">Year 2</option>
+                                    <option value="3">Year 3</option>
+                                    <option value="4">Year 4</option>
+                                    <option value="Graduate">Graduate</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="editDepartment">Department</label>
+                                <select id="editDepartment" name="department" required>
+                                    <option value="">-- Select Department --</option>
+                                    <option value="Computer Science">CSE</option>
+                                    <option value="Electronics">ECE</option>
+                                    <option value="Mechanical">Mechanical</option>
+                                    <option value="Electrical">EEE</option>
+                                    <option value="Civil">Civil</option>
+                                    <option value="AIML">AIML</option>
+                                    <option value="Cybersecurity">Cybersecurity</option>
+                                    <option value="Data Science">Data Science</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="editEmail">Email</label>
+                                <input type="email" id="editEmail" name="email" required>
+                            </div>
+
+                            <div class="modal-buttons">
+                                <button type="submit" class="btn-save">Save Changes</button>
+                                <button type="button" class="btn-cancel" id="cancelEditStudent">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            <?php elseif ($page == 'manage_psychometric_questions'): ?>
+                <h2 class="section-title">Manage Psychometric Questions</h2>
+                <p style="margin-bottom: 16px; color: #6b7280;">Add questions manually or upload `.csv` / `.xlsx` files in strict format.</p>
+
+                <?php if (!empty($psychometric_upload_summary)): ?>
+                    <div class="message success"><?php echo htmlspecialchars($psychometric_upload_summary); ?></div>
+                <?php endif; ?>
+
+                <div class="tab-nav" id="psychometricTabs">
+                    <button type="button" class="tab-btn active" data-tab="manual-entry-panel">Manual Entry</button>
+                    <button type="button" class="tab-btn" data-tab="excel-upload-panel">Upload Excel / CSV</button>
+                </div>
+
+                <div id="manual-entry-panel" class="tab-panel active">
+                    <h3 style="margin-bottom: 14px; color: #374151;">Manual Question Entry</h3>
+                    <form method="POST" id="manualQuestionForm" action="?page=manage_psychometric_questions">
+                        <input type="hidden" name="add_psychometric_question" value="1">
+
+                        <div class="form-group">
+                            <label for="manualQuestionText">Question Text</label>
+                            <textarea id="manualQuestionText" name="question" rows="3" style="width:100%; border:1px solid #e5e7eb; border-radius:8px; padding:10px;" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="manualOptionA">Option A</label>
+                            <input type="text" id="manualOptionA" name="option_a" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="manualOptionB">Option B</label>
+                            <input type="text" id="manualOptionB" name="option_b" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="manualOptionC">Option C</label>
+                            <input type="text" id="manualOptionC" name="option_c" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="manualOptionD">Option D</label>
+                            <input type="text" id="manualOptionD" name="option_d" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="manualCorrectAnswer">Correct Answer</label>
+                            <select id="manualCorrectAnswer" name="correct_answer" required>
+                                <option value="">-- Select Correct Answer --</option>
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                                <option value="C">C</option>
+                                <option value="D">D</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn"><i class="fas fa-plus-circle"></i> Save Question</button>
+                    </form>
+                </div>
+
+                <div id="excel-upload-panel" class="tab-panel">
+                    <h3 style="margin-bottom: 14px; color: #374151;">Upload Questions from Excel/CSV</h3>
+                    <p style="font-size: 14px; color: #6b7280; margin-bottom: 8px;">
+                        Strict header required:
+                        <strong>Question | Option A | Option B | Option C | Option D | Correct Answer</strong>
+                    </p>
+                    <form method="POST" action="?page=manage_psychometric_questions" enctype="multipart/form-data">
+                        <input type="hidden" name="upload_psychometric_file" value="1">
+                        <div class="form-group">
+                            <label for="psychometricFile">Choose File (.csv or .xlsx, max 2MB)</label>
+                            <input type="file" id="psychometricFile" name="psychometric_file" accept=".csv,.xlsx" required>
+                        </div>
+                        <button type="submit" class="btn"><i class="fas fa-upload"></i> Upload File</button>
+                    </form>
+                </div>
+
+                <div style="background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:20px;">
+                    <h3 style="margin-bottom: 14px; color: #374151;">Latest Questions</h3>
+                    <?php if ($psychometric_questions_result && $psychometric_questions_result->num_rows > 0): ?>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Question</th>
+                                        <th>A</th>
+                                        <th>B</th>
+                                        <th>C</th>
+                                        <th>D</th>
+                                        <th>Correct</th>
+                                        <th>Created</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php while ($q_row = $psychometric_questions_result->fetch_assoc()): ?>
+                                        <tr>
+                                            <td><?php echo (int)$q_row['id']; ?></td>
+                                            <td><?php echo htmlspecialchars($q_row['question']); ?></td>
+                                            <td><?php echo htmlspecialchars($q_row['option_a']); ?></td>
+                                            <td><?php echo htmlspecialchars($q_row['option_b']); ?></td>
+                                            <td><?php echo htmlspecialchars($q_row['option_c']); ?></td>
+                                            <td><?php echo htmlspecialchars($q_row['option_d']); ?></td>
+                                            <td><strong><?php echo htmlspecialchars($q_row['correct_answer']); ?></strong></td>
+                                            <td><?php echo htmlspecialchars($q_row['created_at']); ?></td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php else: ?>
+                        <p class="no-data">No psychometric questions added yet.</p>
+                    <?php endif; ?>
+                </div>
             <?php elseif ($page == 'psychometric_status'): ?>
                 <h2>Psychometric Assessment Status</h2>
 
@@ -1203,6 +1871,136 @@ if ($page == 'requests') {
             <?php endif; ?>
         </div>
     </div>
+
+    <?php if ($page == 'manage_psychometric_questions'): ?>
+    <script>
+        (function () {
+            const tabButtons = document.querySelectorAll('#psychometricTabs .tab-btn');
+            const panels = document.querySelectorAll('.tab-panel');
+            const manualForm = document.getElementById('manualQuestionForm');
+            const uploadInput = document.getElementById('psychometricFile');
+
+            tabButtons.forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    tabButtons.forEach(function (b) { b.classList.remove('active'); });
+                    panels.forEach(function (p) { p.classList.remove('active'); });
+                    btn.classList.add('active');
+                    const target = document.getElementById(btn.dataset.tab);
+                    if (target) {
+                        target.classList.add('active');
+                    }
+                });
+            });
+
+            if (manualForm) {
+                const questionPattern = /^[a-zA-Z0-9\s\?\!\,\.\-\(\)']{10,}$/;
+                const optionPattern = /^.{1,}$/;
+                const answerPattern = /^[ABCD]$/;
+
+                manualForm.addEventListener('submit', function (event) {
+                    const question = (document.getElementById('manualQuestionText').value || '').trim();
+                    const a = (document.getElementById('manualOptionA').value || '').trim();
+                    const b = (document.getElementById('manualOptionB').value || '').trim();
+                    const c = (document.getElementById('manualOptionC').value || '').trim();
+                    const d = (document.getElementById('manualOptionD').value || '').trim();
+                    const answer = (document.getElementById('manualCorrectAnswer').value || '').trim();
+
+                    if (!questionPattern.test(question) || !optionPattern.test(a) || !optionPattern.test(b) || !optionPattern.test(c) || !optionPattern.test(d) || !answerPattern.test(answer)) {
+                        event.preventDefault();
+                        alert('Validation failed. Check question, options, and correct answer format.');
+                    }
+                });
+            }
+
+            if (uploadInput) {
+                uploadInput.addEventListener('change', function () {
+                    const file = uploadInput.files[0];
+                    if (!file) {
+                        return;
+                    }
+                    const name = (file.name || '').toLowerCase();
+                    const validExt = name.endsWith('.csv') || name.endsWith('.xlsx');
+                    const maxSize = 2 * 1024 * 1024;
+                    if (!validExt) {
+                        alert('Only .csv and .xlsx files are allowed.');
+                        uploadInput.value = '';
+                        return;
+                    }
+                    if (file.size > maxSize) {
+                        alert('File size must be 2MB or less.');
+                        uploadInput.value = '';
+                    }
+                });
+            }
+        })();
+    </script>
+    <?php endif; ?>
+
+    <?php if ($page == 'registered_students'): ?>
+    <script src="../Student/roll_validation.js"></script>
+    <script>
+        (function () {
+            const modal = document.getElementById('editStudentModal');
+            const form = document.getElementById('editStudentForm');
+            const closeBtn = document.getElementById('closeEditStudentModal');
+            const cancelBtn = document.getElementById('cancelEditStudent');
+            const editButtons = document.querySelectorAll('.edit-student-btn');
+            const idField = document.getElementById('editStudentId');
+            const nameField = document.getElementById('editFullName');
+            const emailField = document.getElementById('editEmail');
+            const rollField = document.getElementById('editRollNumber');
+            const deptField = document.getElementById('editDepartment');
+            const yearField = document.getElementById('editYear');
+
+            if (!modal || !form) {
+                return;
+            }
+
+            function closeModal() {
+                modal.classList.remove('active');
+                modal.setAttribute('aria-hidden', 'true');
+            }
+
+            function openModal() {
+                modal.classList.add('active');
+                modal.setAttribute('aria-hidden', 'false');
+            }
+
+            function fillFormFromButton(button) {
+                idField.value = button.dataset.id || '';
+                nameField.value = button.dataset.full_name || '';
+                emailField.value = button.dataset.email || '';
+                rollField.value = button.dataset.roll_number || '';
+                deptField.value = button.dataset.department || '';
+                yearField.value = button.dataset.year || '';
+            }
+
+            editButtons.forEach(function (button) {
+                button.addEventListener('click', function () {
+                    fillFormFromButton(button);
+                    openModal();
+                });
+            });
+
+            closeBtn.addEventListener('click', closeModal);
+            cancelBtn.addEventListener('click', closeModal);
+
+            modal.addEventListener('click', function (event) {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape') {
+                    closeModal();
+                }
+            });
+
+            attachRollNumberValidation(form, 'editRollNumber', 'rollNumberError');
+        })();
+    </script>
+    <?php endif; ?>
 </body>
 </html>
 <?php
