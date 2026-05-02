@@ -1,172 +1,42 @@
-﻿# IAP Portal (Industrial Awareness Program)
+# IAP Portal
 
-## Overview
+Industrial Awareness Program portal built with PHP and MySQL for student onboarding, session registration, psychometric assessment, and admin management.
 
-The IAP Portal is a PHP/MySQL web application designed for student session registration, psychometric assessment, and admin session management. It supports:
+## Setup
 
-- public session browsing and registration requests
-- student registration with validation and first-login password reset
-- protected student dashboard with session tracking and psychometric reporting
-- admin dashboard for session creation, session requests, student oversight, and psychometric analytics
-- automatic database initialization for easy XAMPP deployment
-
-## Key Features
-
-### Public Portal
-
-- **Homepage (`index.php`)**
-  - Year-wise session catalog
-  - Session registration request form
-  - Session suggestion modal
-  - Links to Admin and Student login
-
-- **Session Registration (`register.php`)**
-  - Submits student session registration requests
-  - Stores user details and desired session information
-
-- **Session Suggestion (`suggest_session.php`)**
-  - Accepts student session suggestions from the homepage or dashboard
-  - Tracks pending, approved, and rejected requests
-
-- **AJAX session registration (`session_registration.php`)**
-  - Registers a student interest in a session and redirects to student login
-  - Enables quick session sign-up from the public index page
-
-### Student Portal
-
-- **Student Registration (`Student/student_register.php`)**
-  - New student registration form with required fields
-  - First-time disclaimer modal before form access
-  - Roll number format validation
-  - Default password assignment: `student@IAP`
-  - Automatic password reset requirement on first login
-  - Optional session registration when landing via session request
-
-- **Student Login (`Student/student_login.php`)**
-  - Authenticates student by email and password
-  - Creates required database tables automatically if missing
-  - Inserts a default sample student for testing if no records exist
-  - Redirects first-time users to `reset_password.php`
-
-- **Password Reset (`reset_password.php`)**
-  - Secure password reset form with validation
-  - Enforces password strength and confirmation
-  - Updates `is_password_changed` flag after successful reset
-
-- **Session Protection (`Student/student_session_check.php`)**
-  - Shared include for student-only pages
-  - Validates session and student record before page access
-  - Redirects to student login if authentication fails
-
-- **Student Dashboard (`student_dashboard.php`)**
-  - Protected portal for logged-in students
-  - Displays student details and registered session status
-  - Supports session suggestions from logged-in students
-  - Provides access to psychometric report and reset password sections
-
-- **Psychometric Quiz (`psychometric_quiz.php`)**
-  - Student quiz page for psychometric assessment
-  - Requires student session validation
-  - Redirects to psychometric report after completion
-
-- **Student Psychometric Report (`student_psychometric_report.php`)**
-  - Shows psychometric results in a formatted report
-  - Supports download-friendly output
-
-### Admin Portal
-
-- **Admin Login (`Admin/admin_login.php`)**
-  - Admin authentication with default account initialization
-  - Creates `iap_users_details` and related tables automatically
-  - Default admin account is inserted if missing
-
-- **Admin Dashboard (`Admin/admin_dashboard.php`)**
-  - Session analytics and platform overview
-  - Session creation form
-  - Pending/approved/rejected session request management
-  - Registered student listing and attendance overview
-  - Psychometric status and score analytics
-
-- **Admin Psychometric Report (`Admin/psychometric_report.php`)**
-  - Admin-side report viewing for individual students
-  - Supports data export and detailed result inspection
+1. Start Apache and MySQL in XAMPP.
+2. Open phpMyAdmin and import `final_database.sql`.
+3. Update credentials in `config/db.php`:
+   - `$db_host`
+   - `$db_user`
+   - `$db_pass`
+   - `$db_name`
+4. Place project in XAMPP htdocs path (example: `htdocs/IAP_VER8`).
+5. Run in browser: `http://localhost/IAP_VER8/index.php`.
 
 ## Database
 
-- Primary database: `iap_portal`
-- Core tables:
+- Single connection file: `config/db.php`
+- Single setup SQL file: `final_database.sql`
+- Core tables included:
+  - `iap_users_details`
   - `IAP_students`
   - `sessions`
   - `iap_student_sessions`
-  - `iap_psychometric_scores`
-  - `iap_session_suggestions`
   - `iap_session_registrations`
-  - `iap_users_details`
+  - `iap_session_suggestions`
+  - `iap_psychometric_scores`
+  - `psychometric_questions`
 
-The application creates these tables automatically on first request if they do not exist.
+## Structure
 
-## Setup Instructions
+- `config/` - centralized configuration (`db.php`)
+- `Admin/` - admin pages and dashboard
+- `Student/` - student auth and guard files
+- `assets/` - static files (reserved for images/css/js)
 
-1. Install XAMPP and start Apache + MySQL.
-2. Copy the `IAP_VER8` folder into `htdocs`.
-3. Open the project in the browser:
-   - `http://localhost/IAP_VER8/index.php`
-4. Use the student login link or admin login link as needed.
+## Security Notes
 
-### Recommended credentials
-
-- Student:
-  - email: `test@example.com`
-  - password: `student@IAP`
-
-- Admin:
-  - email: `admin@example.com`
-  - password: `admin@example.com` (default admin password is hashed in source)
-
-> Note: If you want to reset or customize admin credentials, update `Admin/admin_login.php`.
-
-## File Structure
-
-- `index.php` — Public landing page and session catalog
-- `register.php` — Public session request form
-- `suggest_session.php` — Handles session suggestions
-- `session_registration.php` — AJAX registration redirect for session selection
-- `Student/student_register.php` — Student signup page
-- `Student/student_login.php` — Student authentication page
-- `Student/student_session_check.php` — Student access control include
-- `student_dashboard.php` — Student portal and interface
-- `reset_password.php` — Password reset flow
-- `psychometric_quiz.php` — Psychometric assessment form
-- `student_psychometric_report.php` — Student report download
-- `Admin/admin_login.php` — Admin authentication
-- `Admin/admin_dashboard.php` — Admin panel and management console
-- `Admin/psychometric_report.php` — Admin report view
-- `theme.css` — Custom project styles
-- `documents/` — Supporting implementation and testing documentation
-
-## Notes
-
-- The registration flow includes a disclaimer modal so students must agree before signing up.
-- Student login and registration data is protected using prepared statements to avoid SQL injection.
-- The student dashboard and quiz pages are protected by session validation.
-- Tables are created or repaired automatically to support first-run deployment.
-
-## Additional Documentation
-
-This repository includes a `documents/` folder with detailed guides:
-
-- `README_FIRST.md` — quick start index
-- `QUICK_START.md` — setup in 5 minutes
-- `FINAL_CHECKLIST.md` — testing checklist
-- `STUDENT_SYSTEM_DOCUMENTATION.md` — complete functional documentation
-- `IMPLEMENTATION_SUMMARY.md` — feature summary and architecture
-
-## Recommended Next Steps
-
-1. Visit `Student/student_register.php` to create a student account.
-2. Visit `Student/student_login.php` and log in.
-3. Complete `reset_password.php` on first login.
-4. Explore `student_dashboard.php` and psychometric tools.
-5. Log in as admin at `Admin/admin_login.php` to manage sessions and requests.
-
-Happy testing and deployment!
+- DB credentials are centralized and no longer duplicated across files.
+- Prepared statements are used in critical auth/register flows.
+- Session-based access checks remain active for protected pages.

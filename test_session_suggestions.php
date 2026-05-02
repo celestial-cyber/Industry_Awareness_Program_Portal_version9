@@ -4,18 +4,7 @@
  * This file checks if the table exists and displays current data
  */
 
-$servername = "localhost";
-$username = "root";
-$password = "";
-
-$conn = new mysqli($servername, $username, $password);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-
-// Select database
-$conn->select_db("iap_portal");
+require_once __DIR__ . '/config/db.php';
 
 echo "<h2>Session Suggestions Table Test</h2>";
 

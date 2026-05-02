@@ -5,22 +5,7 @@ if (isset($_GET['success'])) {
 }
 
 // Fetch sessions from database
-$servername = "localhost";
-$username = "root";
-$password_db = "";
-
-$conn = new mysqli($servername, $username, $password_db);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-
-// Create database if not exists
-$sql = "CREATE DATABASE IF NOT EXISTS iap_portal";
-$conn->query($sql);
-
-// Select the database
-$conn->select_db("iap_portal");
+require_once __DIR__ . '/config/db.php';
 
 // Create tables if not exist
 $sql = "CREATE TABLE IF NOT EXISTS iap_users_details (

@@ -17,15 +17,7 @@ $error_message = '';
 $success_message = '';
 $is_first_login = isset($_GET['first_login']) && $_GET['first_login'] == 1;
 
-$servername = "localhost";
-$db_username = "root";
-$db_password = "";
-
-$conn = new mysqli($servername, $db_username, $db_password, "iap_portal");
-
-if ($conn->connect_error) {
-    $error_message = "Database connection failed";
-}
+require_once __DIR__ . '/config/db.php';
 
 // Handle password reset form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {

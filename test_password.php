@@ -12,17 +12,7 @@ $result = password_verify($input_password, $stored_hash);
 echo "Password verify result: " . ($result ? "TRUE" : "FALSE") . "\n";
 
 // Test database connection and retrieval
-$servername = "localhost";
-$username = "root";
-$password = "";
-
-$conn = new mysqli($servername, $username, $password);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-
-$conn->select_db("iap_portal");
+require_once __DIR__ . '/config/db.php';
 
 // Get the stored hash from database
 $result = $conn->query("SELECT password FROM iap_users_details WHERE username='admin@sa.com'");

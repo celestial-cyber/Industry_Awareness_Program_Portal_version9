@@ -5,15 +5,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
-$servername = "localhost";
-$username = "root";
-$password = "";
-$database = "iap_portal";
-
-$conn = new mysqli($servername, $username, $password, $database);
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+require_once __DIR__ . '/../config/db.php';
 
 $message = '';
 $report_data = null;

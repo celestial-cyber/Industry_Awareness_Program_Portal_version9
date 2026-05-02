@@ -63,20 +63,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (!empty($validation_errors)) {
         $error_message = implode("<br>", $validation_errors);
     } else {
-        // Database connection
-        $servername = "localhost";
-        $db_username = "root";
-        $db_password = ""; // XAMPP default root password is empty
-        
-        $conn = new mysqli($servername, $db_username, $db_password);
+        require_once __DIR__ . '/../config/db.php';
         
         if ($conn->connect_error) {
             $error_message = "Database connection failed. Please try again later.";
         } else {
-            // Create database if not exists
-            $sql = "CREATE DATABASE IF NOT EXISTS iap_portal";
-            $conn->query($sql);
-            $conn->select_db("iap_portal");
             $conn->set_charset("utf8");
             
             // Create IAP_students table if not exists

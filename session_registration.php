@@ -25,11 +25,7 @@ if ($session_id <= 0) {
     exit();
 }
 
-$conn = new mysqli("localhost", "root", "", "iap_portal");
-if ($conn->connect_error) {
-    echo json_encode(['status' => 'error', 'message' => 'Database connection failed']);
-    exit();
-}
+require_once __DIR__ . '/config/db.php';
 
 // Ensure tracking columns and uniqueness exist.
 $col_session_year = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_year'");

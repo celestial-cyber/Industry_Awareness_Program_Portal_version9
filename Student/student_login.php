@@ -26,20 +26,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } elseif (empty($password)) {
         $error_message = "Password is required";
     } else {
-        // Database connection
-        $servername = "localhost";
-        $db_username = "root";
-        $db_password = "";
-        
-        $conn = new mysqli($servername, $db_username, $db_password);
+        require_once __DIR__ . '/../config/db.php';
         
         if ($conn->connect_error) {
             $error_message = "Database connection failed";
         } else {
-            // Create database if not exists
-            $sql = "CREATE DATABASE IF NOT EXISTS iap_portal";
-            $conn->query($sql);
-            $conn->select_db("iap_portal");
             
             // Create IAP_students table if not exists
             $create_table_sql = "CREATE TABLE IF NOT EXISTS IAP_students (

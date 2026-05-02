@@ -1,22 +1,6 @@
 <?php
 // suggest_session.php
-$servername = "localhost";
-$username = "root";
-$password = "";
-
-// Create connection
-$conn = new mysqli($servername, $username, $password);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-
-// Create database if not exists
-$sql = "CREATE DATABASE IF NOT EXISTS iap_portal";
-$conn->query($sql);
-
-// Select the database
-$conn->select_db("iap_portal");
+require_once __DIR__ . '/config/db.php';
 
 // Create session_suggestions table
 $sql = "CREATE TABLE IF NOT EXISTS iap_session_suggestions (
