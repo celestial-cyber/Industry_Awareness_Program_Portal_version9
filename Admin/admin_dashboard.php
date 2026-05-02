@@ -65,6 +65,16 @@ $sql = "CREATE TABLE IF NOT EXISTS sessions (
 );";
 $conn->query($sql);
 
+// Add structured session code column (idempotent migration).
+$session_code_column_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'session_code'");
+if ($session_code_column_check && $session_code_column_check->num_rows === 0) {
+    $conn->query("ALTER TABLE sessions ADD COLUMN session_code VARCHAR(20) NULL AFTER id");
+}
+$session_code_unique_check = $conn->query("SHOW INDEX FROM sessions WHERE Key_name = 'uq_sessions_session_code'");
+if ($session_code_unique_check && $session_code_unique_check->num_rows === 0) {
+    $conn->query("ALTER TABLE sessions ADD UNIQUE KEY uq_sessions_session_code (session_code)");
+}
+
 $sql = "CREATE TABLE IF NOT EXISTS iap_session_suggestions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -156,6 +166,12 @@ $sql = "CREATE TABLE IF NOT EXISTS psychometric_questions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );";
 $conn->query($sql);
+
+// Prevent duplicate registration of the same student in the same session.
+$registration_unique_check = $conn->query("SHOW INDEX FROM iap_student_sessions WHERE Key_name = 'unique_student_session'");
+if ($registration_unique_check && $registration_unique_check->num_rows === 0) {
+    $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
+}
 // Recommended duplicate prevention on first 255 chars.
 // Add the unique index only once to avoid duplicate-key fatal errors on subsequent page loads.
 $index_check = $conn->query("SHOW INDEX FROM psychometric_questions WHERE Key_name = 'uq_psychometric_question'");
@@ -172,6 +188,16 @@ $page = isset($_GET['page']) ? $_GET['page'] : 'home';
 $valid_years = ['1', '2', '3', '4', 'Graduate'];
 $valid_departments = ['Computer Science', 'Electronics', 'Mechanical', 'Electrical', 'Civil', 'AIML', 'Cybersecurity', 'Data Science', 'Other'];
 $psychometric_upload_summary = '';
+$session_wise_registrations = [];
+$session_registration_rows = [];
+$session_title_column = 'topic';
+$registration_year_filter = '';
+$registration_sort = 'latest';
+
+$title_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'title'");
+if ($title_col_check && $title_col_check->num_rows > 0) {
+    $session_title_column = 'title';
+}
 
 $question_pattern = "/^[a-zA-Z0-9\\s\\?\\!\\,\\.\\-\\(\\)']{10,}$/";
 $option_pattern = "/^.{1,}$/";
@@ -190,15 +216,108 @@ function validate_psychometric_question_row($question, $a, $b, $c, $d, $answer, 
         && preg_match($answer_pattern, $answer) === 1;
 }
 
+/**
+ * Normalize year text into YY code used by session codes.
+ */
+function year_to_code(string $year): string
+{
+    $v = strtolower(trim($year));
+    if (preg_match('/([1-4])/', $v, $m)) {
+        return str_pad($m[1], 2, '0', STR_PAD_LEFT);
+    }
+    return '00';
+}
+
+/**
+ * Generate next session code for a given year.
+ * Format: YYSNNN (e.g. 01SN01, 02SN03)
+ */
+function generate_next_session_code(mysqli $conn, string $year): string
+{
+    $yy = year_to_code($year);
+    $prefix = $yy . 'SN';
+
+    $sql = "SELECT session_code FROM sessions
+            WHERE session_code LIKE CONCAT(?, '%')
+            ORDER BY session_code DESC
+            LIMIT 1";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return $prefix . '01';
+    }
+    $stmt->bind_param("s", $prefix);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $last = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+
+    $next_num = 1;
+    if ($last && !empty($last['session_code']) && preg_match('/SN(\d{2})$/', $last['session_code'], $m)) {
+        $next_num = intval($m[1]) + 1;
+    }
+    return $prefix . str_pad((string)$next_num, 2, '0', STR_PAD_LEFT);
+}
+
+/**
+ * One-time/backfill: generate missing session_code for existing sessions,
+ * grouped by year and ordered by id ascending.
+ */
+function backfill_session_codes(mysqli $conn): void
+{
+    $query = "SELECT id, year FROM sessions WHERE session_code IS NULL OR session_code = '' ORDER BY year ASC, id ASC";
+    $result = $conn->query($query);
+    if (!$result) {
+        return;
+    }
+
+    $year_counters = [];
+    while ($row = $result->fetch_assoc()) {
+        $session_id = (int)$row['id'];
+        $year = (string)$row['year'];
+        $yy = year_to_code($year);
+        if ($yy === '00') {
+            continue;
+        }
+        if (!isset($year_counters[$yy])) {
+            $count_sql = "SELECT COUNT(*) AS cnt FROM sessions WHERE session_code LIKE CONCAT(?, '%')";
+            $count_stmt = $conn->prepare($count_sql);
+            if ($count_stmt) {
+                $prefix = $yy . 'SN';
+                $count_stmt->bind_param("s", $prefix);
+                $count_stmt->execute();
+                $cnt_res = $count_stmt->get_result();
+                $cnt_row = $cnt_res ? $cnt_res->fetch_assoc() : ['cnt' => 0];
+                $year_counters[$yy] = intval($cnt_row['cnt']);
+                $count_stmt->close();
+            } else {
+                $year_counters[$yy] = 0;
+            }
+        }
+        $year_counters[$yy]++;
+        $session_code = $yy . 'SN' . str_pad((string)$year_counters[$yy], 2, '0', STR_PAD_LEFT);
+
+        $upd = $conn->prepare("UPDATE sessions SET session_code = ? WHERE id = ?");
+        if ($upd) {
+            $upd->bind_param("si", $session_code, $session_id);
+            $upd->execute();
+            $upd->close();
+        }
+    }
+}
+
+// Ensure existing sessions receive structured codes.
+backfill_session_codes($conn);
+
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_session'])) {
     $topic = $_POST['topic'];
     $year = $_POST['year'];
 
-    $sql = "INSERT INTO sessions (topic, year) VALUES (?, ?)";
+    $new_session_code = generate_next_session_code($conn, (string)$year);
+    $sql = "INSERT INTO sessions (session_code, topic, year) VALUES (?, ?, ?)";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("ss", $topic, $year);
+    $stmt->bind_param("sss", $new_session_code, $topic, $year);
     if ($stmt->execute()) {
-        $message = "Session created successfully!";
+        $message = "Session created successfully! Code: " . htmlspecialchars($new_session_code);
     } else {
         $message = "Error: " . $conn->error;
     }
@@ -478,7 +597,7 @@ if ($page == 'requests') {
                 s.department,
                 s.year,
                 COUNT(DISTINCT ss.session_id) as sessions_count,
-                GROUP_CONCAT(DISTINCT sess.topic SEPARATOR ', ') as registered_sessions,
+                GROUP_CONCAT(DISTINCT CONCAT(COALESCE(sess.session_code, ''), CASE WHEN sess.session_code IS NULL OR sess.session_code = '' THEN '' ELSE ' - ' END, sess.{$session_title_column}) SEPARATOR ', ') as registered_sessions,
                 COALESCE(ps.score, 0) as iap_psychometric_score,
                 CASE WHEN ps.score IS NOT NULL THEN 'Completed' ELSE 'Not Taken' END as assessment_status
             FROM iap_students s
@@ -518,6 +637,182 @@ if ($page == 'requests') {
     if (!$pending_result) {
         die("MySQL Error fetching pending psychometric results: " . $conn->error);
     }
+} else if ($page == 'session_wise_registrations') {
+    // Validate filters.
+    $allowed_filter_years = ['1', '2', '3', '4', 'Graduate'];
+    $registration_year_filter = trim($_GET['year_filter'] ?? '');
+    if (!in_array($registration_year_filter, $allowed_filter_years, true)) {
+        $registration_year_filter = '';
+    }
+
+    $registration_sort = strtolower(trim($_GET['sort'] ?? 'latest'));
+    if (!in_array($registration_sort, ['latest', 'oldest'], true)) {
+        $registration_sort = 'latest';
+    }
+
+    // Load form-submitted data from index.php table iap_session_registrations (if available).
+    $use_form_table = false;
+    $form_table_check = $conn->query("SHOW TABLES LIKE 'iap_session_registrations'");
+    if ($form_table_check && $form_table_check->num_rows > 0) {
+        $use_form_table = true;
+    }
+
+    if ($use_form_table) {
+        $form_sql = "SELECT
+                        CONCAT('form_', r.id) AS session_id,
+                        r.session_desired AS session_title,
+                        r.year AS session_year,
+                        r.name AS student_name,
+                        r.roll_number,
+                        r.department,
+                        r.email,
+                        r.other_query,
+                        r.submitted_at AS registration_date
+                     FROM iap_session_registrations r";
+        $form_where = "";
+        $form_order = " ORDER BY r.year ASC, r.session_desired ASC, r.submitted_at " . ($registration_sort === 'oldest' ? 'ASC' : 'DESC');
+
+        $stmt = null;
+        if ($registration_year_filter !== '') {
+            $form_where = " WHERE r.year = ?";
+            $stmt = $conn->prepare($form_sql . $form_where . $form_order);
+            if (!$stmt) {
+                die("MySQL Prepare Error: " . $conn->error);
+            }
+            $stmt->bind_param("s", $registration_year_filter);
+        } else {
+            $stmt = $conn->prepare($form_sql . $form_order);
+            if (!$stmt) {
+                die("MySQL Prepare Error: " . $conn->error);
+            }
+        }
+
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        // Group by session title + year for single-table form registrations.
+        while ($row = $result->fetch_assoc()) {
+            $key = trim((string)$row['session_title']) . '|' . trim((string)$row['session_year']);
+            if (!isset($session_wise_registrations[$key])) {
+                $session_wise_registrations[$key] = [
+                    'session_id' => $key,
+                    'session_title' => $row['session_title'],
+                    'session_year' => $row['session_year'],
+                    'total_registered' => 0,
+                    'students' => []
+                ];
+            }
+            $session_wise_registrations[$key]['students'][] = [
+                'student_name' => $row['student_name'],
+                'roll_number' => $row['roll_number'],
+                'year' => $row['session_year'],
+                'department' => $row['department'],
+                'email' => $row['email'],
+                'session_desired' => $row['session_title'],
+                'other_query' => $row['other_query'] ?? '',
+                'registration_date' => $row['registration_date']
+            ];
+            $session_registration_rows[] = [
+                'session_title' => $row['session_title'],
+                'session_year' => $row['session_year'],
+                'student_name' => $row['student_name'],
+                'roll_number' => $row['roll_number'],
+                'year' => $row['session_year'],
+                'department' => $row['department'],
+                'email' => $row['email'],
+                'session_desired' => $row['session_title'],
+                'other_query' => $row['other_query'] ?? '',
+                'registration_date' => $row['registration_date']
+            ];
+            $session_wise_registrations[$key]['total_registered']++;
+        }
+        $stmt->close();
+    }
+
+    // Also load normalized student-portal registrations (iap_student_sessions + iap_students + sessions).
+    $registration_date_column = 'registered_at';
+    $registered_at_check = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'registered_at'");
+    if (!$registered_at_check || $registered_at_check->num_rows === 0) {
+        $created_at_check = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'created_at'");
+        if ($created_at_check && $created_at_check->num_rows > 0) {
+            $registration_date_column = 'created_at';
+        }
+    }
+
+    $base_sql = "SELECT
+                    s.id AS session_id,
+                    CONCAT(COALESCE(s.session_code, ''), CASE WHEN s.session_code IS NULL OR s.session_code = '' THEN '' ELSE ' - ' END, s.{$session_title_column}) AS session_title,
+                    s.year AS session_year,
+                    st.full_name AS student_name,
+                    st.roll_number,
+                    st.department,
+                    st.email,
+                    ss.{$registration_date_column} AS registration_date
+                 FROM iap_student_sessions ss
+                 INNER JOIN iap_students st ON st.id = ss.student_id
+                 INNER JOIN sessions s ON s.id = ss.session_id";
+
+    $where_clause = "";
+    $order_clause = " ORDER BY s.year ASC, s.{$session_title_column} ASC, ss.{$registration_date_column} " . ($registration_sort === 'oldest' ? 'ASC' : 'DESC');
+
+    $stmt = null;
+    if ($registration_year_filter !== '') {
+        $where_clause = " WHERE s.year = ?";
+        $stmt = $conn->prepare($base_sql . $where_clause . $order_clause);
+        if (!$stmt) {
+            die("MySQL Prepare Error: " . $conn->error);
+        }
+        $stmt->bind_param("s", $registration_year_filter);
+    } else {
+        $stmt = $conn->prepare($base_sql . $order_clause);
+        if (!$stmt) {
+            die("MySQL Prepare Error: " . $conn->error);
+        }
+    }
+
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    while ($row = $result->fetch_assoc()) {
+        $sid = (int)$row['session_id'];
+        $group_key = 'db_' . $sid;
+        if (!isset($session_wise_registrations[$group_key])) {
+            $session_wise_registrations[$group_key] = [
+                'session_id' => $sid,
+                'session_title' => $row['session_title'],
+                'session_year' => $row['session_year'],
+                'total_registered' => 0,
+                'students' => []
+            ];
+        }
+        $session_wise_registrations[$group_key]['students'][] = [
+            'student_name' => $row['student_name'],
+            'roll_number' => $row['roll_number'],
+            'year' => $row['session_year'],
+            'department' => $row['department'],
+            'email' => $row['email'],
+            'session_desired' => $row['session_title'],
+            'other_query' => '',
+            'registration_date' => $row['registration_date']
+        ];
+        $session_registration_rows[] = [
+            'session_title' => $row['session_title'],
+            'session_year' => $row['session_year'],
+            'student_name' => $row['student_name'],
+            'roll_number' => $row['roll_number'],
+            'year' => $row['session_year'],
+            'department' => $row['department'],
+            'email' => $row['email'],
+            'session_desired' => $row['session_title'],
+            'other_query' => '',
+            'registration_date' => $row['registration_date']
+        ];
+        $session_wise_registrations[$group_key]['total_registered']++;
+    }
+    $stmt->close();
+
+    // Re-index for foreach rendering.
+    $session_wise_registrations = array_values($session_wise_registrations);
 } else if ($page == 'manage_psychometric_questions') {
     $psychometric_questions_result = $conn->query("SELECT id, question, option_a, option_b, option_c, option_d, correct_answer, created_at FROM psychometric_questions ORDER BY id DESC LIMIT 50");
 }
@@ -1115,6 +1410,7 @@ if ($page == 'requests') {
                 <li><a href="?page=create_session" class="<?php echo $page == 'create_session' ? 'active' : ''; ?>">Create Session</a></li>
                 <li><a href="?page=requests" class="<?php echo $page == 'requests' ? 'active' : ''; ?>">View Session Requests</a></li>
                 <li><a href="?page=registered_students" class="<?php echo $page == 'registered_students' ? 'active' : ''; ?>">View Registered Students</a></li>
+                <li><a href="?page=session_wise_registrations" class="<?php echo $page == 'session_wise_registrations' ? 'active' : ''; ?>">View Registered Sessions</a></li>
                 <li><a href="?page=psychometric_status" class="<?php echo $page == 'psychometric_status' ? 'active' : ''; ?>">Check Psychometric Status</a></li>
                 <li><a href="?page=manage_psychometric_questions" class="<?php echo $page == 'manage_psychometric_questions' ? 'active' : ''; ?>">Add Ques in Psychometric Quiz</a></li>
             </ul>
@@ -1687,6 +1983,82 @@ if ($page == 'requests') {
                         </form>
                     </div>
                 </div>
+            <?php elseif ($page == 'session_wise_registrations'): ?>
+                <h2 class="section-title">View Registered Sessions</h2>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <form method="GET" action="" style="display:grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items:end;">
+                            <input type="hidden" name="page" value="session_wise_registrations">
+                            <div>
+                                <label for="year_filter"><strong>Year Filter</strong></label>
+                                <select id="year_filter" name="year_filter" class="form-control">
+                                    <option value="">All Years</option>
+                                    <option value="1" <?php echo $registration_year_filter === '1' ? 'selected' : ''; ?>>1</option>
+                                    <option value="2" <?php echo $registration_year_filter === '2' ? 'selected' : ''; ?>>2</option>
+                                    <option value="3" <?php echo $registration_year_filter === '3' ? 'selected' : ''; ?>>3</option>
+                                    <option value="4" <?php echo $registration_year_filter === '4' ? 'selected' : ''; ?>>4</option>
+                                    <option value="Graduate" <?php echo $registration_year_filter === 'Graduate' ? 'selected' : ''; ?>>Graduate</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="sort"><strong>Sort Option</strong></label>
+                                <select id="sort" name="sort" class="form-control">
+                                    <option value="latest" <?php echo $registration_sort === 'latest' ? 'selected' : ''; ?>>Latest registrations first</option>
+                                    <option value="oldest" <?php echo $registration_sort === 'oldest' ? 'selected' : ''; ?>>Oldest registrations first</option>
+                                </select>
+                            </div>
+                            <div>
+                                <button type="submit" class="btn btn-primary"><i class="fas fa-filter"></i> Apply</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <?php if (!empty($session_registration_rows)): ?>
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <strong>All Candidate Registrations</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Session Title</th>
+                                            <th>Session Year</th>
+                                            <th>Student Name</th>
+                                            <th>Roll Number</th>
+                                            <th>Year</th>
+                                            <th>Department</th>
+                                            <th>Email</th>
+                                            <th>Session Desired</th>
+                                            <th>Query</th>
+                                            <th>Registration Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($session_registration_rows as $student_item): ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($student_item['session_title']); ?></td>
+                                                <td><?php echo htmlspecialchars($student_item['session_year']); ?></td>
+                                                <td><?php echo htmlspecialchars($student_item['student_name']); ?></td>
+                                                <td><?php echo htmlspecialchars($student_item['roll_number']); ?></td>
+                                                <td><?php echo htmlspecialchars($student_item['year']); ?></td>
+                                                <td><?php echo htmlspecialchars($student_item['department']); ?></td>
+                                                <td><?php echo htmlspecialchars($student_item['email']); ?></td>
+                                                <td><?php echo htmlspecialchars($student_item['session_desired']); ?></td>
+                                                <td><?php echo !empty($student_item['other_query']) ? htmlspecialchars($student_item['other_query']) : 'N/A'; ?></td>
+                                                <td><?php echo !empty($student_item['registration_date']) ? htmlspecialchars(date('M j, Y g:i A', strtotime($student_item['registration_date']))) : 'N/A'; ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <p class="no-data">No registrations found.</p>
+                <?php endif; ?>
             <?php elseif ($page == 'manage_psychometric_questions'): ?>
                 <h2 class="section-title">Manage Psychometric Questions</h2>
                 <p style="margin-bottom: 16px; color: #6b7280;">Add questions manually or upload `.csv` / `.xlsx` files in strict format.</p>

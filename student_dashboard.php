@@ -23,32 +23,105 @@ if (empty($_SESSION['disclaimer_shown'])) {
 $error_message = '';
 $registered_sessions = [];
 $student_year = (string)($_SESSION['year'] ?? '');
+$session_title_column = 'topic';
+$session_description_exists = false;
+$session_code_exists = false;
+
+// Resolve sessions schema differences across environments (title/topic, optional description).
+$title_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'title'");
+if ($title_col_check && $title_col_check->num_rows > 0) {
+    $session_title_column = 'title';
+}
+$description_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'description'");
+$session_description_exists = ($description_col_check && $description_col_check->num_rows > 0);
+$session_code_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'session_code'");
+$session_code_exists = ($session_code_col_check && $session_code_col_check->num_rows > 0);
 
 /**
  * Student year authorization for session registration.
- * Graduate students are allowed for all session years.
+ * Students are allowed only for their own session year.
  */
 function can_register_for_session_year(string $student_year, string $session_year): bool
 {
-    if ($student_year === 'Graduate') {
-        return true;
+    return normalize_year_key($student_year) === normalize_year_key($session_year);
+}
+
+/**
+ * Normalize academic year label (e.g. "3", "Year 3", "3rd Year", "Graduate") into a comparable key.
+ */
+function normalize_year_key(string $value): string
+{
+    $value = trim(strtolower($value));
+    $value = str_replace(['year', '-', '_'], ' ', $value);
+    $value = preg_replace('/\s+/', ' ', $value);
+    if (preg_match('/\b([1-4])\b/', $value, $m)) {
+        return $m[1];
     }
-    return $student_year === $session_year;
+    if (strpos($value, 'graduate') !== false) {
+        return 'graduate';
+    }
+    return $value;
+}
+
+/**
+ * Build display label as "session_code - title" when code exists.
+ */
+function session_display_label(array $session): string
+{
+    $code = trim((string)($session['session_code'] ?? ''));
+    $title = trim((string)($session['title'] ?? ''));
+    return $code !== '' ? ($code . ' - ' . $title) : $title;
+}
+
+/**
+ * Generate next structured session code for a given year.
+ */
+function generate_next_session_code_for_year(mysqli $conn, string $year): string
+{
+    $yy = year_to_code_for_session($year);
+    $prefix = $yy . 'SN';
+    $sql = "SELECT session_code FROM sessions WHERE session_code LIKE CONCAT(?, '%') ORDER BY session_code DESC LIMIT 1";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return $prefix . '01';
+    }
+    $stmt->bind_param("s", $prefix);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $last = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+    $n = 1;
+    if ($last && !empty($last['session_code']) && preg_match('/SN(\d{2})$/', $last['session_code'], $m)) {
+        $n = intval($m[1]) + 1;
+    }
+    return $prefix . str_pad((string)$n, 2, '0', STR_PAD_LEFT);
+}
+
+function year_to_code_for_session(string $year): string
+{
+    $k = normalize_year_key($year);
+    if (in_array($k, ['1', '2', '3', '4'], true)) {
+        return str_pad($k, 2, '0', STR_PAD_LEFT);
+    }
+    return '00';
 }
 
 try {
     // Fetch student's registered sessions using MySQLi prepared statement
+    $description_select = $session_description_exists ? "s.description" : "''";
+    $session_code_select = $session_code_exists ? "s.session_code" : "'' AS session_code";
     $sql = "SELECT 
                 s.id,
-                s.topic as title,
+                {$session_code_select},
+                s.{$session_title_column} as title,
                 s.year,
-                '' as description,
+                {$description_select} as description,
                 ss.registration_status,
                 ss.registered_at
             FROM sessions s
             JOIN iap_student_sessions ss ON s.id = ss.session_id
             WHERE ss.student_id = ?
-            ORDER BY s.year ASC, s.topic ASC";
+            ORDER BY s.year ASC, s.{$session_title_column} ASC";
     
     $stmt = $conn->prepare($sql);
     
@@ -89,53 +162,86 @@ if (isset($_GET['logout'])) {
 // Handle session registration
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
     $session_id = intval($_POST['session_id'] ?? 0);
+    $catalog_title = trim((string)($_POST['catalog_title'] ?? ''));
 
-    if ($session_id > 0) {
+    if ($session_id > 0 || $catalog_title !== '') {
+        // For catalog-only rows, create/find a real session first so registration can be persisted.
+        if ($session_id <= 0 && $catalog_title !== '') {
+            $find_session_sql = "SELECT id, year FROM sessions WHERE {$session_title_column} = ? AND year = ? LIMIT 1";
+            $find_stmt = $conn->prepare($find_session_sql);
+            if ($find_stmt) {
+                $find_stmt->bind_param("ss", $catalog_title, $student_year);
+                $find_stmt->execute();
+                $find_result = $find_stmt->get_result();
+                $found = $find_result ? $find_result->fetch_assoc() : null;
+                $find_stmt->close();
+
+                if ($found) {
+                    $session_id = (int)$found['id'];
+                } else {
+                    if ($session_code_exists) {
+                        $new_code = generate_next_session_code_for_year($conn, $student_year);
+                        $insert_session_sql = "INSERT INTO sessions (session_code, {$session_title_column}, year) VALUES (?, ?, ?)";
+                        $insert_session_stmt = $conn->prepare($insert_session_sql);
+                        if ($insert_session_stmt) {
+                            $insert_session_stmt->bind_param("sss", $new_code, $catalog_title, $student_year);
+                            if ($insert_session_stmt->execute()) {
+                                $session_id = (int)$conn->insert_id;
+                            }
+                            $insert_session_stmt->close();
+                        }
+                    } else {
+                        $insert_session_sql = "INSERT INTO sessions ({$session_title_column}, year) VALUES (?, ?)";
+                        $insert_session_stmt = $conn->prepare($insert_session_sql);
+                        if ($insert_session_stmt) {
+                            $insert_session_stmt->bind_param("ss", $catalog_title, $student_year);
+                            if ($insert_session_stmt->execute()) {
+                                $session_id = (int)$conn->insert_id;
+                            }
+                            $insert_session_stmt->close();
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($session_id <= 0) {
+            $error_message = "Unable to register this session right now.";
+        }
+
         // Fetch session year + name for server-side validation and storage.
-        $session_sql = "SELECT id, topic, year FROM sessions WHERE id = ?";
-        $session_stmt = $conn->prepare($session_sql);
-        $session_stmt->bind_param("i", $session_id);
-        $session_stmt->execute();
-        $session_result = $session_stmt->get_result();
-        $session_row = $session_result->fetch_assoc();
-        $session_stmt->close();
+        if ($session_id > 0) {
+            $session_sql = "SELECT id, {$session_title_column} AS session_title, year FROM sessions WHERE id = ?";
+            $session_stmt = $conn->prepare($session_sql);
+            $session_stmt->bind_param("i", $session_id);
+            $session_stmt->execute();
+            $session_result = $session_stmt->get_result();
+            $session_row = $session_result->fetch_assoc();
+            $session_stmt->close();
 
-        if (!$session_row) {
-            $error_message = "Session not found.";
-        } elseif (!can_register_for_session_year($student_year, (string)$session_row['year'])) {
-            $error_message = "You can only register for sessions of your academic year";
-        } else {
-            // Ensure supporting columns/index exist.
-            $col_session_name = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_name'");
-            if ($col_session_name && $col_session_name->num_rows === 0) {
-                $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN session_name VARCHAR(255) NULL AFTER session_id");
-            }
-            $col_session_year = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_year'");
-            if ($col_session_year && $col_session_year->num_rows === 0) {
-                $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN session_year VARCHAR(20) NULL AFTER session_name");
-            }
-            $col_registration_status = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'registration_status'");
-            if ($col_registration_status && $col_registration_status->num_rows === 0) {
-                $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN registration_status ENUM('registered','completed','dropped') DEFAULT 'registered' AFTER session_year");
-            }
-            $unique_check = $conn->query("SHOW INDEX FROM iap_student_sessions WHERE Key_name = 'unique_student_session'");
-            if ($unique_check && $unique_check->num_rows === 0) {
-                $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
-            }
+            if (!$session_row) {
+                $error_message = "Session not found.";
+            } elseif (!can_register_for_session_year($student_year, (string)$session_row['year'])) {
+                $error_message = "You can only register for sessions of your academic year";
+            } else {
+                // Ensure duplicate prevention index exists.
+                $unique_check = $conn->query("SHOW INDEX FROM iap_student_sessions WHERE Key_name = 'unique_student_session'");
+                if ($unique_check && $unique_check->num_rows === 0) {
+                    $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
+                }
 
-            // Register for session if not duplicate.
-            $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, session_name, session_year, registration_status) VALUES (?, ?, ?, ?, 'registered')";
-            $register_stmt = $conn->prepare($register_sql);
-            $session_name = (string)$session_row['topic'];
-            $session_year = (string)$session_row['year'];
-            $register_stmt->bind_param("iiss", $_SESSION['student_id'], $session_id, $session_name, $session_year);
+                // Register for session if not duplicate.
+                $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id) VALUES (?, ?)";
+                $register_stmt = $conn->prepare($register_sql);
+                $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
 
-            if ($register_stmt->execute()) {
-                header("Location: ?view=view_all_sessions&success=1");
-                exit();
+                if ($register_stmt->execute()) {
+                    header("Location: ?view=view_all_sessions&success=1");
+                    exit();
+                }
+                $error_message = "Already registered for this session or unable to register.";
+                $register_stmt->close();
             }
-            $error_message = "Already registered for this session or unable to register.";
-            $register_stmt->close();
         }
     }
 }
@@ -397,7 +503,7 @@ if (isset($_POST['reset_password'])) {
             position: fixed;
             left: 0;
             top: 70px;
-            height: calc(100vh - 70px - 80px); /* Subtract footer height */
+            height: calc(100vh - 70px - 64px); /* Subtract header and footer height */
             overflow-y: auto;
             box-shadow: var(--shadow);
         }
@@ -479,6 +585,9 @@ if (isset($_POST['reset_password'])) {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             box-shadow: var(--shadow-lg);
             backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 1100;
         }
 
         .navbar-custom .navbar-brand {
@@ -886,7 +995,7 @@ if (isset($_POST['reset_password'])) {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 0%);
             color: white;
             text-align: center;
-            padding: 20px;
+            padding: 14px 20px;
             position: fixed;
             bottom: 0;
             left: 260px;
@@ -898,14 +1007,14 @@ if (isset($_POST['reset_password'])) {
 
         .dashboard-footer p {
             margin: 0;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
         }
 
         /* Adjust main content to account for fixed footer */
         .main-dashboard-content {
             margin-left: 260px;
-            margin-bottom: 80px; /* Space for footer */
+            margin-bottom: 64px; /* Space for footer */
             flex: 1;
             width: calc(100% - 260px);
             padding: 0;
@@ -928,14 +1037,10 @@ if (isset($_POST['reset_password'])) {
             color: #0369a1;
         }
 
-        /* Footer */
+        /* Footer fine-tuning (do not override fixed layout) */
         .dashboard-footer {
-            text-align: center;
-            padding: 30px 20px;
-            color: #fcfcfc;
-            font-size: 14px;
-            border-top: 1px solid #e5e7eb;
-            margin-top: 50px;
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            margin-top: 0;
         }
 
         @media (max-width: 768px) {
@@ -1121,58 +1226,6 @@ if (isset($_POST['reset_password'])) {
             <?php endif; ?>
 
             <?php
-
-            // Handle session registration
-            if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
-                $session_id = intval($_POST['session_id']);
-                
-                // Check if already registered
-                $check_sql = "SELECT id FROM iap_student_sessions WHERE student_id = ? AND session_id = ?";
-                $check_stmt = $conn->prepare($check_sql);
-                $check_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
-                $check_stmt->execute();
-                $check_result = $check_stmt->get_result();
-                
-                if ($check_result->num_rows == 0) {
-                    // Not registered yet, so register
-                    $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
-                    $register_stmt = $conn->prepare($register_sql);
-                    $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
-                    
-                    if ($register_stmt->execute()) {
-                        // Refresh registered sessions
-                        $sql = "SELECT 
-                                    s.id,
-                                    s.topic as title,
-                                    s.year,
-                                    '' as description,
-                                    ss.registration_status,
-                                    ss.registered_at
-                                FROM sessions s
-                                JOIN iap_student_sessions ss ON s.id = ss.session_id
-                                WHERE ss.student_id = ?
-                                ORDER BY s.year ASC, s.topic ASC";
-                        
-                        $stmt = $conn->prepare($sql);
-                        $stmt->bind_param("i", $_SESSION['student_id']);
-                        $stmt->execute();
-                        $result = $stmt->get_result();
-                        
-                        $registered_sessions = [];
-                        while ($row = $result->fetch_assoc()) {
-                            $registered_sessions[] = $row;
-                        }
-                        $stmt->close();
-                        
-                        // Redirect to view registered sessions
-                        header("Location: ?view=view_registered_sessions&success=1");
-                        exit();
-                    }
-                    $register_stmt->close();
-                }
-                $check_stmt->close();
-            }
-
             if ($view == 'dashboard') {
                 // Default dashboard view
                 ?>
@@ -1218,11 +1271,15 @@ if (isset($_POST['reset_password'])) {
                     <p>Browse all available IAP sessions and register for the ones that interest you.</p>
                 </div>
                 <?php
-                // Fetch all available sessions
-                $all_sessions_sql = "SELECT s.*, COUNT(ss.student_id) as registered_count FROM sessions s
-                                   LEFT JOIN IAP_student_sessions ss ON s.id = ss.session_id
-                                   GROUP BY s.id ORDER BY s.year ASC, s.title ASC";
-                $all_sessions_result = $conn->query($all_sessions_sql);
+                // Fetch sessions only for logged-in student's academic year.
+                $description_select = $session_description_exists ? "s.description" : "''";
+                $session_code_select = $session_code_exists ? "s.session_code" : "'' AS session_code";
+                $all_sessions_sql = "SELECT s.id, {$session_code_select}, s.{$session_title_column} AS title, s.year, {$description_select} AS description, COUNT(ss.student_id) as registered_count FROM sessions s
+                                   LEFT JOIN iap_student_sessions ss ON s.id = ss.session_id
+                                   GROUP BY s.id ORDER BY s.{$session_title_column} ASC";
+                $all_sessions_stmt = $conn->prepare($all_sessions_sql);
+                $all_sessions_stmt->execute();
+                $all_sessions_result = $all_sessions_stmt->get_result();
 
                 if ($all_sessions_result && $all_sessions_result->num_rows > 0):
                     // Group sessions by year
@@ -1586,8 +1643,11 @@ if (isset($_POST['reset_password'])) {
                 // View All Sessions - Show all sessions with registration option
                 ?>
                 <div class="welcome-header">
-                    <h1><i class="fas fa-list"></i> All Available Sessions</h1>
-                    <p>Browse all available sessions across all years. Click "Get Registered" to register for a session.</p>
+                    <h1><i class="fas fa-list"></i> Available Sessions</h1>
+                    <p>Browse sessions available for your academic year. Click "Get Registered" to register for a session.</p>
+                    <div class="mt-2">
+                        <span class="badge bg-light text-dark">Your Year: <?php echo htmlspecialchars($student_year ?: 'N/A'); ?></span>
+                    </div>
                 </div>
 
                 <?php if (isset($_GET['success'])): ?>
@@ -1604,14 +1664,110 @@ if (isset($_POST['reset_password'])) {
                 <?php endif; ?>
 
                 <?php
-                // Fetch all sessions grouped by year
-                $all_sessions_sql = "SELECT * FROM sessions ORDER BY year ASC, title ASC";
-                $all_sessions_result = $conn->query($all_sessions_sql);
+                // Fetch sessions only for logged-in student's academic year.
+                $title_select = ($session_title_column === 'title') ? "COALESCE(NULLIF(title, ''), topic)" : "topic";
+                $description_select = $session_description_exists ? "description" : "''";
+                $session_code_select = $session_code_exists ? "session_code" : "'' AS session_code";
+                $all_sessions_sql = "SELECT id, {$session_code_select}, {$title_select} AS title, year, {$description_select} AS description
+                                     FROM sessions
+                                     ORDER BY {$session_title_column} ASC";
+                $all_sessions_stmt = $conn->prepare($all_sessions_sql);
+                $all_sessions_stmt->execute();
+                $all_sessions_result_raw = $all_sessions_stmt->get_result();
+                $sessions_filtered = [];
+                $student_year_key = normalize_year_key($student_year);
+                while ($session_row = $all_sessions_result_raw->fetch_assoc()) {
+                    if (normalize_year_key((string)$session_row['year']) === $student_year_key) {
+                        $sessions_filtered[] = $session_row;
+                    }
+                }
+                $all_sessions_result = null;
+                if (!empty($sessions_filtered)) {
+                    $all_sessions_result = new ArrayObject($sessions_filtered);
+                }
 
-                if ($all_sessions_result && $all_sessions_result->num_rows > 0):
+                // Merge index.php year-wise catalog so all sessions stay visible even if only few are in DB.
+                $index_year_catalog = [
+                    '1' => [
+                        'Introduction to Engineering Careers',
+                        'How to Ace Ideathons',
+                        'What is Problem-Solving?',
+                        'Emerging Technologies Overview',
+                        'Soft Skills: Communication & Teamwork',
+                        'College to Career Transition',
+                        'Resume Building Basics',
+                        'Industry Standards, Ethics & Workplace Communication',
+                        'Roles, Responsibilities & Career Pathways in Industry',
+                        'LinkedIn Profile Basics'
+                    ],
+                    '2' => [
+                        'Resume Building and Career Positioning',
+                        'LinkedIn Mastery for Students',
+                        'Interview Preparation Fundamentals',
+                        'Presentation & Public Skills',
+                        'Internship Success Strategy',
+                        'Wokrplace Communication & Etiquette',
+                        'Building your Personal Brand',
+                        'Aptitude & Reasoning for Placements',
+                        'Hackathon Success & Learning',
+                        'Time Management, Company Opportunities & Certifications'
+                    ],
+                    '3' => [
+                        'Career Paths Beyond Campus Placements',
+                        'Confidence Building in High-Pressure Situations',
+                        'Project Presentation & Demo Skills',
+                        'Internship to Full-Time Conversion',
+                        'Salary Negotiation & Career Economics',
+                        'Advanced Job Search Strategy & Placement Mastery',
+                        'Core vs Non-Core Career Paths & Specialization',
+                        'Advanced Interview Essentials & Preparation Strategy',
+                        'GitHub Portfolio & Open Source Contribution',
+                        'Managing Academics, Placements & Growth'
+                    ],
+                    '4' => [
+                        'Advanced System Design & Scalability',
+                        'Specialization Deep Dive',
+                        'Startup Ecosystem & Entrepreneurship',
+                        'Research & Innovation in Engineering',
+                        'Advanced Leadership & Management',
+                        'Industry Certifications & Strategic Learning Roadmap',
+                        'Global Opportunities & Remote Work',
+                        'Real-World Project Development',
+                        'Personal Branding & Personal Development',
+                        'Alternative Paths & Contingency Planning'
+                    ]
+                ];
+                $year_key = normalize_year_key($student_year);
+                $merged_rows = [];
+                $seen_titles = [];
+                if ($all_sessions_result && count($all_sessions_result) > 0) {
+                    foreach ($all_sessions_result as $row) {
+                        $key = strtolower(trim((string)$row['title']));
+                        $seen_titles[$key] = true;
+                        $merged_rows[] = $row;
+                    }
+                }
+                if (isset($index_year_catalog[$year_key])) {
+                    foreach ($index_year_catalog[$year_key] as $topic) {
+                        $key = strtolower(trim($topic));
+                        if (!isset($seen_titles[$key])) {
+                            $merged_rows[] = [
+                                'id' => 0,
+                                'title' => $topic,
+                                'year' => $student_year,
+                                'description' => ''
+                            ];
+                        }
+                    }
+                }
+                if (!empty($merged_rows)) {
+                    $all_sessions_result = new ArrayObject($merged_rows);
+                }
+
+                if ($all_sessions_result && count($all_sessions_result) > 0):
                     // Group sessions by year
                     $sessions_by_year_all = [];
-                    while ($session = $all_sessions_result->fetch_assoc()) {
+                    foreach ($all_sessions_result as $session) {
                         $sessions_by_year_all[$session['year']][] = $session;
                     }
 
@@ -1619,73 +1775,64 @@ if (isset($_POST['reset_password'])) {
                         ?>
                         <div class="year-section" style="margin-bottom: 40px;">
                             <h3 class="year-title" style="color: #7c3aed; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #f0f4ff; font-size: 22px; font-weight: 700;">
-                                <i class="fas fa-graduation-cap"></i> Year <?php echo $year; ?> Sessions
+                                <i class="fas fa-graduation-cap"></i> Year <?php echo htmlspecialchars((string)$year); ?> Sessions
                             </h3>
-
-                            <div class="sessions-grid">
-                                <?php foreach ($year_sessions as $session):
-                                    // Check if student is already registered
-                                    $is_registered = false;
-                                    foreach ($registered_sessions as $registered) {
-                                        if ($registered['id'] == $session['id']) {
-                                            $is_registered = true;
-                                            break;
+                            <div class="table-responsive" style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+                                <table class="table mb-0" style="width:100%;">
+                                    <thead style="background: #f8fafc;">
+                                        <tr>
+                                            <th style="padding: 12px 16px;">Session Title</th>
+                                            <th style="padding: 12px 16px;">Description</th>
+                                            <th style="padding: 12px 16px;">Status</th>
+                                            <th style="padding: 12px 16px;">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php foreach ($year_sessions as $session):
+                                        $is_registered = false;
+                                        foreach ($registered_sessions as $registered) {
+                                            if ($registered['id'] == $session['id']) {
+                                                $is_registered = true;
+                                                break;
+                                            }
                                         }
-                                    }
                                     ?>
-                                    <div class="session-card quick-register-card"
-                                         data-session-id="<?php echo (int)$session['id']; ?>"
-                                         data-session-title="<?php echo htmlspecialchars($session['title'] ?? $session['topic'], ENT_QUOTES); ?>"
-                                         data-session-year="<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>"
-                                         style="background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.3s; display: flex; flex-direction: column; height: 100%; border: 1px solid #e5e7eb;">
-                                        <div class="session-card-header" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; padding: 24px;">
-                                            <h4 style="margin: 0 0 12px 0; line-height: 1.4; color: white; font-size: 18px; font-weight: 700;">
-                                                <?php echo htmlspecialchars($session['title'] ?? $session['topic']); ?>
-                                            </h4>
-                                            <span style="display: inline-block; background: rgba(255, 255, 255, 0.25); padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: white;">
-                                                Year <?php echo htmlspecialchars($session['year']); ?>
-                                            </span>
-                                        </div>
-
-                                        <div class="session-card-body" style="padding: 24px; flex-grow: 1; display: flex; flex-direction: column;">
-                                            <?php if ($session['description']): ?>
-                                                <p style="color: #6b7280; font-size: 14px; margin-bottom: 16px; flex-grow: 1; line-height: 1.6;">
-                                                    <?php echo htmlspecialchars($session['description']); ?>
-                                                </p>
-                                            <?php endif; ?>
-
-                                            <?php if ($is_registered): ?>
-                                                <div style="padding: 12px; background: #d1fae5; border-radius: 8px; margin-bottom: 16px; text-align: center;">
-                                                    <span style="color: #065f46; font-weight: 600; font-size: 14px;">
-                                                        <i class="fas fa-check-circle"></i> Already Registered
-                                                    </span>
-                                                </div>
-                                                <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="quiz-button" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; text-align: center; transition: all 0.3s;">
-                                                    <i class="fas fa-play"></i> Take Quiz
-                                                </a>
-                                            <?php else: ?>
-                                                <div style="display: flex; gap: 10px;">
-                                                    <button type="button"
-                                                            class="btn btn-success quick-register-btn"
-                                                            data-session-id="<?php echo (int)$session['id']; ?>"
-                                                            data-session-title="<?php echo htmlspecialchars($session['title'] ?? $session['topic'], ENT_QUOTES); ?>"
-                                                            data-session-year="<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>"
-                                                            style="background: #10b981; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; flex: 1; transition: all 0.3s;">
-                                                        <i class="fas fa-plus"></i> Register
-                                                    </button>
-                                                    <button type="button"
-                                                            class="btn btn-outline-primary quick-register-btn"
-                                                            data-session-id="<?php echo (int)$session['id']; ?>"
-                                                            data-session-title="<?php echo htmlspecialchars($session['title'] ?? $session['topic'], ENT_QUOTES); ?>"
-                                                            data-session-year="<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>"
-                                                            style="padding: 12px 14px; border-radius: 8px;">
-                                                        <i class="fas fa-user-plus"></i>
-                                                    </button>
-                                                </div>
-                                            <?php endif; ?>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
+                                        <tr>
+                                            <td style="padding: 12px 16px; font-weight: 600;"><?php echo htmlspecialchars(session_display_label($session)); ?></td>
+                                            <td style="padding: 12px 16px; color: #6b7280;"><?php echo !empty($session['description']) ? htmlspecialchars($session['description']) : 'N/A'; ?></td>
+                                            <td style="padding: 12px 16px;">
+                                                <?php if ($is_registered): ?>
+                                                    <span style="background: #d1fae5; color: #065f46; padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;">Registered</span>
+                                                <?php else: ?>
+                                                    <span style="background: #e5e7eb; color: #374151; padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;">Not Registered</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td style="padding: 12px 16px;">
+                                                <?php if ($is_registered): ?>
+                                                    <a href="quiz.php?session_id=<?php echo (int)$session['id']; ?>" class="btn btn-sm" style="background:#7c3aed; color:white; border:none; border-radius:6px; padding:8px 12px;">
+                                                        <i class="fas fa-play"></i> Take Quiz
+                                                    </a>
+                                                <?php elseif ((int)$session['id'] > 0): ?>
+                                                    <form method="POST" action="?view=view_all_sessions" style="margin:0;">
+                                                        <input type="hidden" name="session_id" value="<?php echo (int)$session['id']; ?>">
+                                                        <button type="submit" name="register_session" class="btn btn-success btn-sm" style="border:none; border-radius:6px; padding:8px 12px;">
+                                                            <i class="fas fa-user-plus"></i> Get Registered
+                                                        </button>
+                                                    </form>
+                                                <?php else: ?>
+                                                    <form method="POST" action="?view=view_all_sessions" style="margin:0;">
+                                                        <input type="hidden" name="session_id" value="0">
+                                                        <input type="hidden" name="catalog_title" value="<?php echo htmlspecialchars($session['title'], ENT_QUOTES); ?>">
+                                                        <button type="submit" name="register_session" class="btn btn-success btn-sm" style="border:none; border-radius:6px; padding:8px 12px;">
+                                                            <i class="fas fa-user-plus"></i> Register
+                                                        </button>
+                                                    </form>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -1728,21 +1875,23 @@ if (isset($_POST['reset_password'])) {
                             <h3 class="year-title" style="color: #7c3aed; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #f0f4ff; font-size: 22px; font-weight: 700;">
                                 <i class="fas fa-graduation-cap"></i> Year <?php echo $year; ?> Sessions
                             </h3>
-
-                            <div class="sessions-grid">
-                                <?php foreach ($year_sessions as $session): ?>
-                                    <div class="session-card" style="background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.3s; display: flex; flex-direction: column; height: 100%; border: 1px solid #e5e7eb;">
-                                        <div class="session-card-header" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; padding: 24px;">
-                                            <h4 style="margin: 0 0 12px 0; line-height: 1.4; color: white; font-size: 18px; font-weight: 700;">
-                                                <?php echo htmlspecialchars($session['title']); ?>
-                                            </h4>
-                                            <span style="display: inline-block; background: rgba(255, 255, 255, 0.25); padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: white;">
-                                                Year <?php echo htmlspecialchars($session['year']); ?>
-                                            </span>
-                                        </div>
-
-                                        <div class="session-card-body" style="padding: 24px; flex-grow: 1; display: flex; flex-direction: column;">
-                                            <div style="margin-bottom: 16px;">
+                            <div class="table-responsive" style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+                                <table class="table mb-0" style="width:100%;">
+                                    <thead style="background: #f8fafc;">
+                                        <tr>
+                                            <th style="padding: 12px 16px;">Session Title</th>
+                                            <th style="padding: 12px 16px;">Year</th>
+                                            <th style="padding: 12px 16px;">Status</th>
+                                            <th style="padding: 12px 16px;">Registered On</th>
+                                            <th style="padding: 12px 16px;">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php foreach ($year_sessions as $session): ?>
+                                        <tr>
+                                            <td style="padding: 12px 16px; font-weight: 600;"><?php echo htmlspecialchars(session_display_label($session)); ?></td>
+                                            <td style="padding: 12px 16px;"><?php echo htmlspecialchars($session['year']); ?></td>
+                                            <td style="padding: 12px 16px;">
                                                 <span style="padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
                                                     <?php
                                                     switch($session['registration_status']) {
@@ -1753,18 +1902,17 @@ if (isset($_POST['reset_password'])) {
                                                     ?>">
                                                     <?php echo ucfirst($session['registration_status']); ?>
                                                 </span>
-                                            </div>
-
-                                            <p style="color: #6b7280; font-size: 14px; margin-bottom: 16px; flex-grow: 1;">
-                                                Registered on: <?php echo date('M j, Y', strtotime($session['registered_at'])); ?>
-                                            </p>
-
-                                            <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="quiz-button" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; text-align: center; transition: all 0.3s;">
-                                                <i class="fas fa-play"></i> Take Quiz
-                                            </a>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
+                                            </td>
+                                            <td style="padding: 12px 16px;"><?php echo date('M j, Y', strtotime($session['registered_at'])); ?></td>
+                                            <td style="padding: 12px 16px;">
+                                                <a href="quiz.php?session_id=<?php echo (int)$session['id']; ?>" class="btn btn-sm" style="background:#7c3aed; color:white; border:none; border-radius:6px; padding:8px 12px;">
+                                                    <i class="fas fa-play"></i> Take Quiz
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -1966,10 +2114,6 @@ if (isset($_POST['reset_password'])) {
     const loggedInStudentYear = <?php echo json_encode((string)$student_year); ?>;
 
     function canStudentRegisterForYear(sessionYear) {
-        // Graduate can register for all years; others only for matching year.
-        if (loggedInStudentYear === 'Graduate') {
-            return true;
-        }
         return String(loggedInStudentYear) === String(sessionYear);
     }
 
@@ -2212,3 +2356,6 @@ if (isset($_POST['reset_password'])) {
     </script>
 </body>
 </html>
+
+
+

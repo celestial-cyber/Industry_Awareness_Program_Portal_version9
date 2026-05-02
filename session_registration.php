@@ -32,13 +32,9 @@ if ($conn->connect_error) {
 }
 
 // Ensure tracking columns and uniqueness exist.
-$col_session_name = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_name'");
-if ($col_session_name && $col_session_name->num_rows === 0) {
-    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN session_name VARCHAR(255) NULL AFTER session_id");
-}
 $col_session_year = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_year'");
 if ($col_session_year && $col_session_year->num_rows === 0) {
-    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN session_year VARCHAR(20) NULL AFTER session_name");
+    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN session_year VARCHAR(20) NULL AFTER session_id");
 }
 $col_registration_status = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'registration_status'");
 if ($col_registration_status && $col_registration_status->num_rows === 0) {
@@ -49,7 +45,13 @@ if ($unique_check && $unique_check->num_rows === 0) {
     $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
 }
 
-$session_sql = "SELECT id, topic, year FROM sessions WHERE id = ?";
+$session_title_column = 'topic';
+$title_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'title'");
+if ($title_col_check && $title_col_check->num_rows > 0) {
+    $session_title_column = 'title';
+}
+
+$session_sql = "SELECT id, {$session_title_column} AS session_title, year FROM sessions WHERE id = ?";
 $session_stmt = $conn->prepare($session_sql);
 $session_stmt->bind_param("i", $session_id);
 $session_stmt->execute();
@@ -66,7 +68,6 @@ $session = $session_result->fetch_assoc();
 $session_stmt->close();
 
 $session_year = (string)$session['year'];
-$session_name = (string)$session['topic'];
 
 // Year rule: Graduate can register to any year; others can only their own year.
 $allowed = ($student_year === 'Graduate') || ($student_year === $session_year);
@@ -76,7 +77,7 @@ if (!$allowed) {
     exit();
 }
 
-$insert_sql = "INSERT INTO iap_student_sessions (student_id, session_id, session_name, session_year, registration_status) VALUES (?, ?, ?, ?, 'registered')";
+$insert_sql = "INSERT INTO iap_student_sessions (student_id, session_id, session_year, registration_status) VALUES (?, ?, ?, 'registered')";
 $insert_stmt = $conn->prepare($insert_sql);
 if (!$insert_stmt) {
     $conn->close();
@@ -84,7 +85,7 @@ if (!$insert_stmt) {
     exit();
 }
 
-$insert_stmt->bind_param("iiss", $student_id, $session_id, $session_name, $session_year);
+$insert_stmt->bind_param("iis", $student_id, $session_id, $session_year);
 if ($insert_stmt->execute()) {
     $insert_stmt->close();
     $conn->close();
