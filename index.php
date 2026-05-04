@@ -5,7 +5,7 @@ if (isset($_GET['success'])) {
 }
 
 // Fetch sessions from database
-require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/common/db.php';
 
 // Create tables if not exist
 $sql = "CREATE TABLE IF NOT EXISTS iap_users_details (
@@ -669,7 +669,7 @@ $conn->close();
 <section id="about" class="section section-alt">
     <div class="container">
         <h2 class="section-title">Session Registration</h2>
-        <form action="register.php" method="post" class="registration-form">
+        <form action="common/register.php" method="post" class="registration-form">
             <label for="name">Name:</label>
             <input type="text" id="name" name="name" required>
 
@@ -719,7 +719,7 @@ $conn->close();
             <span class="close" onclick="closeSuggestionModal()" style="cursor: pointer; font-size: 28px; font-weight: bold; color: #aaa;">&times;</span>
         </div>
         <div class="modal-body" style="padding: 20px; flex: 1; overflow-y: auto; min-height: 300px;">
-            <form action="suggest_session.php" method="post" class="registration-form">
+            <form action="common/suggest_session.php" method="post" class="registration-form">
                 <label for="suggestion_name">Name:</label>
                 <input type="text" id="suggestion_name" name="name" required>
 
@@ -863,7 +863,7 @@ document.querySelector('.register-for-session').addEventListener('click', () => 
     if (!currentSessionId) return;
     
     // Send registration request to server
-    fetch('session_registration.php', {
+    fetch('common/session_registration.php', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',

@@ -5,7 +5,7 @@
  */
 
 // Include session protection - must be at the top
-require_once 'Student/student_session_check.php';
+require_once 'student_session_check.php';
 
 $message = '';
 $report_data = null;
@@ -150,7 +150,7 @@ if (isset($_POST['download_pdf']) && $report_data) {
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Theme CSS -->
-    <link rel="stylesheet" href="theme.css">
+    <link rel="stylesheet" href="../common/theme.css">
     <style>
         :root {
             --primary-color: #7c3aed;

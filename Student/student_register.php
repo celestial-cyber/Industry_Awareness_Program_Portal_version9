@@ -12,7 +12,7 @@ require_once 'validation_helpers.php';
 
 // If already logged in as student, redirect to dashboard
 if (isset($_SESSION['student_id']) && isset($_SESSION['roll_number'])) {
-    header("Location: ../student_dashboard.php");
+    header("Location: student_dashboard.php");
     exit();
 }
 
@@ -63,7 +63,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (!empty($validation_errors)) {
         $error_message = implode("<br>", $validation_errors);
     } else {
-        require_once __DIR__ . '/../config/db.php';
+        require_once __DIR__ . '/../common/db.php';
         
         if ($conn->connect_error) {
             $error_message = "Database connection failed. Please try again later.";
@@ -166,7 +166,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                             $_SESSION['is_password_changed'] = 0;
                                             $_SESSION['selected_session_id'] = $session_id;
                                             
-                                            header("Location: ../reset_password.php?first_login=1&session=" . $session_id);
+                                            header("Location: reset_password.php?first_login=1&session=" . $session_id);
                                             exit();
                                         }
                                         

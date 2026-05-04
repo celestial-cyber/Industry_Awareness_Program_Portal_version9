@@ -1,6 +1,6 @@
 <?php
 // suggest_session.php
-require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/db.php';
 
 // Create session_suggestions table
 $sql = "CREATE TABLE IF NOT EXISTS iap_session_suggestions (
@@ -39,7 +39,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     if ($stmt->execute()) {
         // Redirect back to home page with success message
-        header("Location: index.php?suggestion_success=1");
+        header("Location: ../index.php?suggestion_success=1");
         exit();
     } else {
         echo "Error: " . $sql . "<br>" . $conn->error;

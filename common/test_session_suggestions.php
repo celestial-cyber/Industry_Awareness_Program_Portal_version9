@@ -4,7 +4,7 @@
  * This file checks if the table exists and displays current data
  */
 
-require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/db.php';
 
 echo "<h2>Session Suggestions Table Test</h2>";
 

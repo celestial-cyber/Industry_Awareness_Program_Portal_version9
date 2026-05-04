@@ -14,7 +14,7 @@ if (!isset($_SESSION['student_id']) || !isset($_SESSION['roll_number'])) {
     exit();
 }
 
-require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../common/db.php';
 
 // Set charset to utf8
 $conn->set_charset("utf8");

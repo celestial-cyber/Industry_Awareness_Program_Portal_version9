@@ -7,8 +7,8 @@
  */
 
 // Include session protection - must be at the top
-require_once 'Student/student_session_check.php';
-require_once 'Student/validation_helpers.php';
+require_once 'student_session_check.php';
+require_once 'validation_helpers.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -155,7 +155,7 @@ foreach ($registered_sessions as $session) {
 // Logout function
 if (isset($_GET['logout'])) {
     session_destroy();
-    header("Location: Student/student_login.php");
+    header("Location: student_login.php");
     exit();
 }
 
@@ -470,7 +470,7 @@ if (isset($_POST['reset_password'])) {
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Theme CSS -->
-    <link rel="stylesheet" href="theme.css">
+    <link rel="stylesheet" href="../common/theme.css">
     <style>
         :root {
             --primary-color: #7c3aed;
@@ -1120,7 +1120,7 @@ if (isset($_POST['reset_password'])) {
     <div class="dashboard-sidebar">
         <div class="sidebar-logo">
             <div style="display: flex; align-items: center; gap: 12px;">
-                <img src="images/SA Main logo.jpg" alt="SA Main Logo" title="SA Main">
+                <img src="../images/SA%20Main%20logo.jpg" alt="SA Main Logo" title="SA Main">
                 <div style="display: flex; flex-direction: column;">
                         <span style="font-size: 18px; font-weight: 700; color: #7c3aed; line-height: 1.2;">SPECANCIENS</span>
                         <span style="font-size: 14px; font-weight: 700; color: #6b7280; line-height: 1.2;">IAP Portal</span>
@@ -2078,7 +2078,7 @@ if (isset($_POST['reset_password'])) {
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="Student/roll_validation.js"></script>
+    <script src="roll_validation.js"></script>
 
     <script>
     // Function to view session details
@@ -2126,7 +2126,7 @@ if (isset($_POST['reset_password'])) {
 
         if (confirm(`Are you sure you want to register for "${sessionTitle}"?`)) {
             // Send registration request
-            fetch('session_registration.php', {
+            fetch('../common/session_registration.php', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

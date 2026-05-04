@@ -12,7 +12,7 @@ $result = password_verify($input_password, $stored_hash);
 echo "Password verify result: " . ($result ? "TRUE" : "FALSE") . "\n";
 
 // Test database connection and retrieval
-require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/db.php';
 
 // Get the stored hash from database
 $result = $conn->query("SELECT password FROM iap_users_details WHERE username='admin@sa.com'");

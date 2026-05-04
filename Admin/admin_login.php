@@ -10,7 +10,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $email = $_POST['email'];
     $password = $_POST['password'];
 
-    require_once __DIR__ . '/../config/db.php';
+    require_once __DIR__ . '/../common/db.php';
 
     // Create tables if not exist
     $sql = "CREATE TABLE IF NOT EXISTS iap_users_details (

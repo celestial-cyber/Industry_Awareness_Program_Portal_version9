@@ -5,7 +5,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
-require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../common/db.php';
 
 $message = '';
 $report_data = null;

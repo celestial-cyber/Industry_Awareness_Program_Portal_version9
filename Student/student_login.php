@@ -9,7 +9,7 @@ session_start();
 
 // If already logged in as student, redirect to dashboard
 if (isset($_SESSION['student_id']) && isset($_SESSION['email'])) {
-    header("Location: ../student_dashboard.php");
+    header("Location: student_dashboard.php");
     exit();
 }
 
@@ -26,7 +26,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } elseif (empty($password)) {
         $error_message = "Password is required";
     } else {
-        require_once __DIR__ . '/../config/db.php';
+        require_once __DIR__ . '/../common/db.php';
         
         if ($conn->connect_error) {
             $error_message = "Database connection failed";
@@ -138,7 +138,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         
                         // If password is still default (not changed), redirect to password reset
                         if (!$student['is_password_changed']) {
-                            header("Location: ../reset_password.php?first_login=1");
+                            header("Location: reset_password.php?first_login=1");
                             exit();
                         } else {
                             // Check if there's a selected session to register for
@@ -153,12 +153,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 $reg_stmt->close();
                                 
                                 // Redirect to session's quiz
-                                header("Location: ../quiz.php?session_id=" . $session_id);
+                                header("Location: quiz.php?session_id=" . $session_id);
                                 exit();
                             }
                             
                             // Password already changed, go to dashboard
-                            header("Location: ../student_dashboard.php");
+                            header("Location: student_dashboard.php");
                             exit();
                         }
                     } else {
@@ -446,7 +446,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     </div>
 
                     <div class="back-link">
-                        <a href="index.php"><i class="fas fa-arrow-left"></i> Back to Home</a>
+                        <a href="../index.php"><i class="fas fa-arrow-left"></i> Back to Home</a>
                     </div>
                 </div>
             </div>

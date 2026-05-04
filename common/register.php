@@ -1,6 +1,6 @@
 <?php
 // register.php
-require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/db.php';
 
 // Create tables if not exist
 $sql = "CREATE TABLE IF NOT EXISTS iap_session_registrations (
@@ -35,7 +35,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $stmt->bind_param("sssssss", $name, $roll_number, $year, $department, $email, $session_desired, $other_query);
 
     if ($stmt->execute()) {
-        header("Location: index.php?success=1");
+        header("Location: ../index.php?success=1");
         exit();
     } else {
         echo "Error: " . $sql . "<br>" . $conn->error;

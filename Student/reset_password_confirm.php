@@ -8,7 +8,7 @@
 session_start();
 
 // Include database connection
-require_once 'Student/student_session_check.php';
+require_once 'student_session_check.php';
 
 $message = '';
 $message_type = 'info';
@@ -225,13 +225,13 @@ if (isset($_POST['update_password']) && $token_valid) {
             </form>
 
             <div class="text-center mt-3">
-                <a href="Student/student_login.php" class="text-decoration-none">
+                <a href="student_login.php" class="text-decoration-none">
                     <i class="fas fa-arrow-left"></i> Back to Login
                 </a>
             </div>
         <?php else: ?>
             <div class="text-center">
-                <a href="Student/student_login.php" class="btn btn-primary">
+                <a href="student_login.php" class="btn btn-primary">
                     <i class="fas fa-sign-in-alt"></i> Go to Login
                 </a>
             </div>

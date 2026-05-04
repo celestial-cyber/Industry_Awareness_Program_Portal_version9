@@ -9,7 +9,7 @@ session_start();
 
 // Check if student is logged in
 if (!isset($_SESSION['student_id']) || !isset($_SESSION['roll_number'])) {
-    header("Location: Student/student_login.php");
+    header("Location: student_login.php");
     exit();
 }
 
@@ -17,7 +17,7 @@ $error_message = '';
 $success_message = '';
 $is_first_login = isset($_GET['first_login']) && $_GET['first_login'] == 1;
 
-require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/../common/db.php';
 
 // Handle password reset form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -95,7 +95,7 @@ if ($conn) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">    <!-- Theme CSS -->
-    <link rel="stylesheet" href="theme.css">    <style>
+    <link rel="stylesheet" href="../common/theme.css">    <style>
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;

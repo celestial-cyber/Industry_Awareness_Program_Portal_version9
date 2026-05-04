@@ -25,7 +25,7 @@ if ($session_id <= 0) {
     exit();
 }
 
-require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/db.php';
 
 // Ensure tracking columns and uniqueness exist.
 $col_session_year = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'session_year'");
