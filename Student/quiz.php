@@ -25,7 +25,7 @@ if ($session_id <= 0) {
         // Using prepared statement to prevent SQL injection
         $validation_sql = "SELECT ss.id, s.id as session_id, s.title, s.year, s.description, ss.registration_status
                           FROM iap_student_sessions ss
-                          JOIN sessions s ON ss.session_id = s.id
+                          JOIN iap_sessions s ON ss.session_id = s.id
                           WHERE ss.student_id = ? AND s.id = ?";
         
         $validation_stmt = $conn->prepare($validation_sql);

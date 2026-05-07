@@ -11,8 +11,13 @@ require_once __DIR__ . '/common/db.php';
 $sql = "CREATE TABLE IF NOT EXISTS iap_users_details (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    role ENUM('admin', 'student') NOT NULL
+    role ENUM('admin', 'student') NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_username (username),
+    INDEX idx_email (email)
 );";
 $conn->query($sql);
 
@@ -25,26 +30,129 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_session_registrations (
     email VARCHAR(255) NOT NULL,
     session_desired VARCHAR(255) NOT NULL,
     other_query TEXT,
-    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_roll_number (roll_number),
+    INDEX idx_submitted_at (submitted_at)
 );";
 $conn->query($sql);
 
-$sql = "CREATE TABLE IF NOT EXISTS sessions (
+$sql = "CREATE TABLE IF NOT EXISTS iap_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    session_code VARCHAR(255) NULL,
     topic VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NULL,
     year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    description TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sessions_session_code (session_code),
+    INDEX idx_year (year),
+    INDEX idx_created_at (created_at)
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS iap_students (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    roll_number VARCHAR(50) NOT NULL UNIQUE,
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE,
+    department VARCHAR(100),
+    year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    is_password_changed BOOLEAN DEFAULT FALSE,
+    reset_token VARCHAR(255) NULL,
+    reset_token_expiry DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_roll_number (roll_number),
+    INDEX idx_email (email),
+    INDEX idx_created_at (created_at)
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL,
+    session_id INT NOT NULL,
+    session_year VARCHAR(20) NULL,
+    registration_status ENUM('registered', 'completed', 'dropped') DEFAULT 'registered',
+    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_student_session (student_id, session_id),
+    CONSTRAINT fk_iap_student_sessions_student
+        FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    CONSTRAINT fk_iap_student_sessions_session
+        FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE,
+    INDEX idx_student_id (student_id),
+    INDEX idx_session_id (session_id),
+    INDEX idx_registered_at (registered_at)
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL UNIQUE,
+    score DECIMAL(5,2) NOT NULL,
+    trait_a INT DEFAULT 0,
+    trait_b INT DEFAULT 0,
+    trait_c INT DEFAULT 0,
+    trait_d INT DEFAULT 0,
+    completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_iap_psychometric_student
+        FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    INDEX idx_student_id (student_id)
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_questions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    question TEXT NOT NULL,
+    option_a VARCHAR(255) NOT NULL,
+    option_b VARCHAR(255) NOT NULL,
+    option_c VARCHAR(255) NOT NULL,
+    option_d VARCHAR(255) NOT NULL,
+    correct_answer CHAR(1) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_psychometric_question (question(255)),
+    INDEX idx_created_at (created_at)
 );";
 $conn->query($sql);
 
 // Insert default admin if not exists
-$sql = 'INSERT IGNORE INTO iap_users_details (username, password, role) VALUES (\'admin@sa.com\', \'$2y$10$ACnHZm1VvA1MkO8OmoKv4uOtl4jfdX9F1qFcP4e..e6yugwmvVtxm\', \'admin\')';
+$sql = 'INSERT IGNORE INTO iap_users_details (username, email, password, role) VALUES (\'admin\', \'admin@example.com\', \'$2y$10$xHDNFM0xYFstLYe.BIHMUu4ZxCcEeKOQ3psUy85ZcbsCqdbWUy2Z.\', \'admin\')';
+$conn->query($sql);
+
+// Insert sample sessions if table is empty
+$check_sessions = $conn->query("SELECT COUNT(*) as count FROM iap_sessions");
+if ($check_sessions) {
+    $row = $check_sessions->fetch_assoc();
+    if ($row['count'] == 0) {
+        $sample_sessions = [
+            ['01SN01', 'Introduction to Engineering Careers', 'Introduction to Engineering Careers', '1', 'Career awareness and industry expectations'],
+            ['01SN02', 'How to Ace Ideathons', 'How to Ace Ideathons', '1', 'Innovation and problem-solving skills'],
+            ['02SN01', 'Resume Building and Career Positioning', 'Resume Building and Career Positioning', '2', 'Professional skills development'],
+            ['02SN02', 'Interview Preparation Fundamentals', 'Interview Preparation Fundamentals', '2', 'Interview techniques and tips'],
+            ['03SN01', 'Internship Readiness Program', 'Internship Readiness Program', '3', 'Preparing for internships'],
+            ['03SN02', 'Advanced System Design', 'Advanced System Design', '3', 'Technical depth and scalability'],
+            ['04SN01', 'Startup Ecosystem and Entrepreneurship', 'Startup Ecosystem and Entrepreneurship', '4', 'Entrepreneurial pathways'],
+            ['04SN02', 'Leadership and Management Skills', 'Leadership and Management Skills', '4', 'Leadership development'],
+        ];
+        
+        $insert_sql = "INSERT IGNORE INTO iap_sessions (session_code, topic, title, year, description) VALUES (?, ?, ?, ?, ?)";
+        $insert_stmt = $conn->prepare($insert_sql);
+        if ($insert_stmt) {
+            foreach ($sample_sessions as $session) {
+                $insert_stmt->bind_param("sssss", $session[0], $session[1], $session[2], $session[3], $session[4]);
+                $insert_stmt->execute();
+            }
+            $insert_stmt->close();
+        }
+    }
+}
 $conn->query($sql);
 
 $sessions = [];
 $sessions_with_ids = [];
 for ($year = 1; $year <= 5; $year++) {
-    $sql = "SELECT id, topic, session_code FROM sessions WHERE year = ? ORDER BY created_at DESC";
+    $sql = "SELECT id, topic, session_code FROM iap_sessions WHERE year = ? ORDER BY created_at DESC";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("s", $year);
     $stmt->execute();

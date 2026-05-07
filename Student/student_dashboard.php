@@ -28,13 +28,13 @@ $session_description_exists = false;
 $session_code_exists = false;
 
 // Resolve sessions schema differences across environments (title/topic, optional description).
-$title_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'title'");
+$title_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'title'");
 if ($title_col_check && $title_col_check->num_rows > 0) {
     $session_title_column = 'title';
 }
-$description_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'description'");
+$description_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'description'");
 $session_description_exists = ($description_col_check && $description_col_check->num_rows > 0);
-$session_code_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'session_code'");
+$session_code_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'session_code'");
 $session_code_exists = ($session_code_col_check && $session_code_col_check->num_rows > 0);
 
 /**
@@ -80,7 +80,7 @@ function generate_next_session_code_for_year(mysqli $conn, string $year): string
 {
     $yy = year_to_code_for_session($year);
     $prefix = $yy . 'SN';
-    $sql = "SELECT session_code FROM sessions WHERE session_code LIKE CONCAT(?, '%') ORDER BY session_code DESC LIMIT 1";
+    $sql = "SELECT session_code FROM iap_sessions WHERE session_code LIKE CONCAT(?, '%') ORDER BY session_code DESC LIMIT 1";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
         return $prefix . '01';
@@ -118,7 +118,7 @@ try {
                 {$description_select} as description,
                 ss.registration_status,
                 ss.registered_at
-            FROM sessions s
+            FROM iap_sessions s
             JOIN iap_student_sessions ss ON s.id = ss.session_id
             WHERE ss.student_id = ?
             ORDER BY s.year ASC, s.{$session_title_column} ASC";
@@ -167,7 +167,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
     if ($session_id > 0 || $catalog_title !== '') {
         // For catalog-only rows, create/find a real session first so registration can be persisted.
         if ($session_id <= 0 && $catalog_title !== '') {
-            $find_session_sql = "SELECT id, year FROM sessions WHERE {$session_title_column} = ? AND year = ? LIMIT 1";
+            $find_session_sql = "SELECT id, year FROM iap_sessions WHERE {$session_title_column} = ? AND year = ? LIMIT 1";
             $find_stmt = $conn->prepare($find_session_sql);
             if ($find_stmt) {
                 $find_stmt->bind_param("ss", $catalog_title, $student_year);
@@ -181,7 +181,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
                 } else {
                     if ($session_code_exists) {
                         $new_code = generate_next_session_code_for_year($conn, $student_year);
-                        $insert_session_sql = "INSERT INTO sessions (session_code, {$session_title_column}, year) VALUES (?, ?, ?)";
+                        $insert_session_sql = "INSERT INTO iap_sessions (session_code, {$session_title_column}, year) VALUES (?, ?, ?)";
                         $insert_session_stmt = $conn->prepare($insert_session_sql);
                         if ($insert_session_stmt) {
                             $insert_session_stmt->bind_param("sss", $new_code, $catalog_title, $student_year);
@@ -191,7 +191,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
                             $insert_session_stmt->close();
                         }
                     } else {
-                        $insert_session_sql = "INSERT INTO sessions ({$session_title_column}, year) VALUES (?, ?)";
+                        $insert_session_sql = "INSERT INTO iap_sessions ({$session_title_column}, year) VALUES (?, ?)";
                         $insert_session_stmt = $conn->prepare($insert_session_sql);
                         if ($insert_session_stmt) {
                             $insert_session_stmt->bind_param("ss", $catalog_title, $student_year);
@@ -211,7 +211,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
 
         // Fetch session year + name for server-side validation and storage.
         if ($session_id > 0) {
-            $session_sql = "SELECT id, {$session_title_column} AS session_title, year FROM sessions WHERE id = ?";
+            $session_sql = "SELECT id, {$session_title_column} AS session_title, year FROM iap_sessions WHERE id = ?";
             $session_stmt = $conn->prepare($session_sql);
             $session_stmt->bind_param("i", $session_id);
             $session_stmt->execute();
@@ -275,7 +275,7 @@ if (isset($_POST['update_profile'])) {
     } else {
         try {
             // Verify current password
-            $sql = "SELECT password FROM IAP_students WHERE id = ?";
+            $sql = "SELECT password FROM iap_students WHERE id = ?";
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("i", $_SESSION['student_id']);
             $stmt->execute();
@@ -286,7 +286,7 @@ if (isset($_POST['update_profile'])) {
 
                 if (password_verify($current_password, $student['password'])) {
                     // Check if roll number is already taken by another student
-                    $roll_check_sql = "SELECT id FROM students WHERE roll_number = ? AND id != ?";
+                    $roll_check_sql = "SELECT id FROM iap_students WHERE roll_number = ? AND id != ?";
                     $roll_check_stmt = $conn->prepare($roll_check_sql);
                     $roll_check_stmt->bind_param("si", $roll_number, $_SESSION['student_id']);
                     $roll_check_stmt->execute();
@@ -297,7 +297,7 @@ if (isset($_POST['update_profile'])) {
                         $profile_message_type = 'danger';
                     } else {
                         // Check if email is already taken by another student
-                        $email_check_sql = "SELECT id FROM IAP_students WHERE email = ? AND id != ?";
+                        $email_check_sql = "SELECT id FROM iap_students WHERE email = ? AND id != ?";
                         $email_check_stmt = $conn->prepare($email_check_sql);
                         $email_check_stmt->bind_param("si", $email, $_SESSION['student_id']);
                         $email_check_stmt->execute();
@@ -308,7 +308,7 @@ if (isset($_POST['update_profile'])) {
                             $profile_message_type = 'danger';
                         } else {
                             // Update student profile
-                            $update_sql = "UPDATE IAP_students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ? WHERE id = ?";
+                            $update_sql = "UPDATE iap_students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ? WHERE id = ?";
                             $update_stmt = $conn->prepare($update_sql);
                             $update_stmt->bind_param("sssssi", $full_name, $email, $roll_number, $department, $year, $_SESSION['student_id']);
 
@@ -371,7 +371,7 @@ if (isset($_POST['reset_password'])) {
     } else {
         try {
             // Verify current password
-            $sql = "SELECT password FROM IAP_students WHERE id = ?";
+            $sql = "SELECT password FROM iap_students WHERE id = ?";
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("i", $_SESSION['student_id']);
             $stmt->execute();
@@ -386,7 +386,7 @@ if (isset($_POST['reset_password'])) {
                     $token_expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
 
                     // Store reset token in database
-                    $update_sql = "UPDATE IAP_students SET reset_token = ?, reset_token_expiry = ? WHERE id = ?";
+                    $update_sql = "UPDATE iap_students SET reset_token = ?, reset_token_expiry = ? WHERE id = ?";
                     $update_stmt = $conn->prepare($update_sql);
                     $update_stmt->bind_param("ssi", $reset_token, $token_expiry, $_SESSION['student_id']);
 
@@ -1169,7 +1169,7 @@ if (isset($_POST['reset_password'])) {
                 trait_c INT,
                 trait_d INT,
                 completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE
+                FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE
             )";
             $conn->query($create_psychometric_scores_sql);
 
@@ -1278,7 +1278,7 @@ if (isset($_POST['reset_password'])) {
                 // Fetch sessions only for logged-in student's academic year.
                 $description_select = $session_description_exists ? "s.description" : "''";
                 $session_code_select = $session_code_exists ? "s.session_code" : "'' AS session_code";
-                $all_sessions_sql = "SELECT s.id, {$session_code_select}, s.{$session_title_column} AS title, s.year, {$description_select} AS description, COUNT(ss.student_id) as registered_count FROM sessions s
+                $all_sessions_sql = "SELECT s.id, {$session_code_select}, s.{$session_title_column} AS title, s.year, {$description_select} AS description, COUNT(ss.student_id) as registered_count FROM iap_sessions s
                                    LEFT JOIN iap_student_sessions ss ON s.id = ss.session_id
                                    GROUP BY s.id ORDER BY s.{$session_title_column} ASC";
                 $all_sessions_stmt = $conn->prepare($all_sessions_sql);
@@ -1687,7 +1687,7 @@ if (isset($_POST['reset_password'])) {
                 $description_select = $session_description_exists ? "description" : "''";
                 $session_code_select = $session_code_exists ? "session_code" : "'' AS session_code";
                 $all_sessions_sql = "SELECT id, {$session_code_select}, {$title_select} AS title, year, {$description_select} AS description
-                                     FROM sessions
+                                     FROM iap_sessions
                                      ORDER BY {$session_title_column} ASC";
                 $all_sessions_stmt = $conn->prepare($all_sessions_sql);
                 $all_sessions_stmt->execute();

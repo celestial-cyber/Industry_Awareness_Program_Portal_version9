@@ -32,8 +32,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $error_message = "Database connection failed";
         } else {
             
-            // Create IAP_students table if not exists
-            $create_table_sql = "CREATE TABLE IF NOT EXISTS IAP_students (
+            // Create iap_students table if not exists
+            $create_table_sql = "CREATE TABLE IF NOT EXISTS iap_students (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 roll_number VARCHAR(50) NOT NULL UNIQUE,
                 full_name VARCHAR(255) NOT NULL,
@@ -47,14 +47,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             )";
             $conn->query($create_table_sql);
             
-            // Create sessions table if not exists
-            $create_sessions_table_sql = "CREATE TABLE IF NOT EXISTS sessions (
+            // Create iap_sessions table if not exists
+            $create_sessions_table_sql = "CREATE TABLE IF NOT EXISTS iap_sessions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                title VARCHAR(255) NOT NULL,
-                year ENUM('1', '2', '3', '4') NOT NULL,
+                session_code VARCHAR(255) NULL,
+                topic VARCHAR(255) NOT NULL,
+                title VARCHAR(255) NULL,
+                year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_year (year)
+                UNIQUE KEY uq_sessions_session_code (session_code),
+                INDEX idx_year (year),
+                INDEX idx_created_at (created_at)
             )";
             $conn->query($create_sessions_table_sql);
             
@@ -65,8 +69,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 session_id INT NOT NULL,
                 registration_status ENUM('registered', 'completed', 'dropped') DEFAULT 'registered',
                 registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+                FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE,
                 UNIQUE KEY unique_student_session (student_id, session_id)
             )";
             $conn->query($create_student_sessions_sql);
@@ -80,7 +84,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 trait_c INT,
                 trait_d INT,
                 completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE
+                FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE
             )";
             $conn->query($create_psychometric_scores_sql);
 
@@ -96,14 +100,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
             
             // Insert sample student if table is empty (for testing)
-            $check_sql = "SELECT COUNT(*) as count FROM IAP_students";
+            $check_sql = "SELECT COUNT(*) as count FROM iap_students";
             $result = $conn->query($check_sql);
             $row = $result->fetch_assoc();
             
             if ($row['count'] == 0) {
                 // Default password is "student@IAP"
                 $default_password_hash = password_hash("student@IAP", PASSWORD_BCRYPT);
-                $insert_sql = "INSERT IGNORE INTO IAP_students (roll_number, full_name, email, department, year, password, is_password_changed) 
+                $insert_sql = "INSERT IGNORE INTO iap_students (roll_number, full_name, email, department, year, password, is_password_changed) 
                               VALUES ('2021001', 'Test Student', 'test@example.com', 'Computer Science', '1', ?, FALSE)";
                 $insert_stmt = $conn->prepare($insert_sql);
                 $insert_stmt->bind_param("s", $default_password_hash);
@@ -112,7 +116,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
             
             // Prepare authentication query using prepared statement
-            $sql = "SELECT id, roll_number, full_name, email, department, year, password, is_password_changed FROM IAP_students WHERE email = ?";
+            $sql = "SELECT id, roll_number, full_name, email, department, year, password, is_password_changed FROM iap_students WHERE email = ?";
             $stmt = $conn->prepare($sql);
             
             if (!$stmt) {
@@ -146,7 +150,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 $session_id = intval($_GET['session']);
                                 
                                 // Register student for the selected session
-                                $register_sql = "INSERT IGNORE INTO student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
+                                $register_sql = "INSERT IGNORE INTO iap_student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
                                 $reg_stmt = $conn->prepare($register_sql);
                                 $reg_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
                                 $reg_stmt->execute();

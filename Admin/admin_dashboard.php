@@ -42,24 +42,30 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_session_registrations (
 );";
 $conn->query($sql);
 
-$sql = "CREATE TABLE IF NOT EXISTS sessions (
+$sql = "CREATE TABLE IF NOT EXISTS iap_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    session_code VARCHAR(255) NULL,
     topic VARCHAR(255) NOT NULL,
-    year ENUM('1', '2', '3', '4') NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    title VARCHAR(255) NULL,
+    year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
+    description TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sessions_session_code (session_code),
+    INDEX idx_year (year),
+    INDEX idx_created_at (created_at)
 );";
 $conn->query($sql);
 // Ensure create-session form can store Graduate year without schema mismatch.
-$conn->query("ALTER TABLE sessions MODIFY year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL");
+$conn->query("ALTER TABLE iap_sessions MODIFY year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL");
 
 // Add structured session code column (idempotent migration).
-$session_code_column_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'session_code'");
+$session_code_column_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'session_code'");
 if ($session_code_column_check && $session_code_column_check->num_rows === 0) {
-    $conn->query("ALTER TABLE sessions ADD COLUMN session_code VARCHAR(20) NULL AFTER id");
+    $conn->query("ALTER TABLE iap_sessions ADD COLUMN session_code VARCHAR(255) NULL AFTER id");
 }
-$session_code_unique_check = $conn->query("SHOW INDEX FROM sessions WHERE Key_name = 'uq_sessions_session_code'");
+$session_code_unique_check = $conn->query("SHOW INDEX FROM iap_sessions WHERE Key_name = 'uq_sessions_session_code'");
 if ($session_code_unique_check && $session_code_unique_check->num_rows === 0) {
-    $conn->query("ALTER TABLE sessions ADD UNIQUE KEY uq_sessions_session_code (session_code)");
+    $conn->query("ALTER TABLE iap_sessions ADD UNIQUE KEY uq_sessions_session_code (session_code)");
 }
 
 $sql = "CREATE TABLE IF NOT EXISTS iap_session_suggestions (
@@ -137,12 +143,12 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
     session_id INT NOT NULL,
     registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
-    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE
 );";
 $conn->query($sql);
 
 // Table for managing psychometric quiz questions.
-$sql = "CREATE TABLE IF NOT EXISTS psychometric_questions (
+$sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_questions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     question TEXT NOT NULL,
     option_a VARCHAR(255) NOT NULL,
@@ -161,9 +167,9 @@ if ($registration_unique_check && $registration_unique_check->num_rows === 0) {
 }
 // Recommended duplicate prevention on first 255 chars.
 // Add the unique index only once to avoid duplicate-key fatal errors on subsequent page loads.
-$index_check = $conn->query("SHOW INDEX FROM psychometric_questions WHERE Key_name = 'uq_psychometric_question'");
+$index_check = $conn->query("SHOW INDEX FROM iap_psychometric_questions WHERE Key_name = 'uq_psychometric_question'");
 if ($index_check && $index_check->num_rows === 0) {
-    $conn->query("ALTER TABLE psychometric_questions ADD UNIQUE KEY uq_psychometric_question (question(255))");
+    $conn->query("ALTER TABLE iap_psychometric_questions ADD UNIQUE KEY uq_psychometric_question (question(255))");
 }
 
 // Insert default admin if not exists
@@ -182,7 +188,7 @@ $session_title_column = 'topic';
 $registration_year_filter = '';
 $registration_sort = 'latest';
 
-$title_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'title'");
+$title_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'title'");
 if ($title_col_check && $title_col_check->num_rows > 0) {
     $session_title_column = 'title';
 }
@@ -225,7 +231,7 @@ function generate_next_session_code(mysqli $conn, string $year): string
     $yy = year_to_code($year);
     $prefix = $yy . 'SN';
 
-    $sql = "SELECT session_code FROM sessions
+    $sql = "SELECT session_code FROM iap_sessions
             WHERE session_code LIKE CONCAT(?, '%')
             ORDER BY session_code DESC
             LIMIT 1";
@@ -252,7 +258,7 @@ function generate_next_session_code(mysqli $conn, string $year): string
  */
 function backfill_session_codes(mysqli $conn): void
 {
-    $query = "SELECT id, year FROM sessions WHERE session_code IS NULL OR session_code = '' ORDER BY year ASC, id ASC";
+    $query = "SELECT id, year FROM iap_sessions WHERE session_code IS NULL OR session_code = '' ORDER BY year ASC, id ASC";
     $result = $conn->query($query);
     if (!$result) {
         return;
@@ -267,7 +273,7 @@ function backfill_session_codes(mysqli $conn): void
             continue;
         }
         if (!isset($year_counters[$yy])) {
-            $count_sql = "SELECT COUNT(*) AS cnt FROM sessions WHERE session_code LIKE CONCAT(?, '%')";
+            $count_sql = "SELECT COUNT(*) AS cnt FROM iap_sessions WHERE session_code LIKE CONCAT(?, '%')";
             $count_stmt = $conn->prepare($count_sql);
             if ($count_stmt) {
                 $prefix = $yy . 'SN';
@@ -284,7 +290,7 @@ function backfill_session_codes(mysqli $conn): void
         $year_counters[$yy]++;
         $session_code = $yy . 'SN' . str_pad((string)$year_counters[$yy], 2, '0', STR_PAD_LEFT);
 
-        $upd = $conn->prepare("UPDATE sessions SET session_code = ? WHERE id = ?");
+        $upd = $conn->prepare("UPDATE iap_sessions SET session_code = ? WHERE id = ?");
         if ($upd) {
             $upd->bind_param("si", $session_code, $session_id);
             $upd->execute();
@@ -321,7 +327,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_session'])) {
             $errors[] = "Session code must be in format: ALPHANUMERIC-SESSIONNAME (e.g., CS101-Introduction to Programming). Only letters, numbers, and hyphens allowed.";
         } else {
             // Check for duplicate session code
-            $check_sql = "SELECT id FROM sessions WHERE session_code = ? LIMIT 1";
+            $check_sql = "SELECT id FROM iap_sessions WHERE session_code = ? LIMIT 1";
             $check_stmt = $conn->prepare($check_sql);
             if ($check_stmt) {
                 $check_stmt->bind_param("s", $manual_session_code);
@@ -339,7 +345,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_session'])) {
         // Use manual code if provided, otherwise auto-generate
         $session_code = !empty($manual_session_code) ? $manual_session_code : generate_next_session_code($conn, (string)$year);
         
-        $sql = "INSERT INTO sessions (session_code, topic, year) VALUES (?, ?, ?)";
+        $sql = "INSERT INTO iap_sessions (session_code, topic, year) VALUES (?, ?, ?)";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("sss", $session_code, $topic, $year);
         if ($stmt->execute()) {
@@ -502,7 +508,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_psychometric_quest
     if (!validate_psychometric_question_row($question, $option_a, $option_b, $option_c, $option_d, $correct_answer, $question_pattern, $option_pattern, $answer_pattern)) {
         $message = "Validation failed. Ensure question/options/correct answer follow required format.";
     } else {
-        $insert_sql = "INSERT INTO psychometric_questions (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)";
+        $insert_sql = "INSERT INTO iap_psychometric_questions (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)";
         $insert_stmt = $conn->prepare($insert_sql);
         if ($insert_stmt) {
             $insert_stmt->bind_param("ssssss", $question, $option_a, $option_b, $option_c, $option_d, $correct_answer);
@@ -587,7 +593,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['upload_psychometric_fi
                         if ($header_row !== $expected_headers) {
                             $message = "Header mismatch. Required format: Question | Option A | Option B | Option C | Option D | Correct Answer";
                         } else {
-                            $insert_sql = "INSERT INTO psychometric_questions (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)";
+                            $insert_sql = "INSERT INTO iap_psychometric_questions (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)";
                             $insert_stmt = $conn->prepare($insert_sql);
                             if (!$insert_stmt) {
                                 $message = "Database error: " . $conn->error;
@@ -671,7 +677,7 @@ if ($page == 'requests') {
                 CASE WHEN ps.score IS NOT NULL THEN 'Completed' ELSE 'Not Taken' END as assessment_status
             FROM iap_students s
             LEFT JOIN iap_student_sessions ss ON s.id = ss.student_id
-            LEFT JOIN sessions sess ON ss.session_id = sess.id
+            LEFT JOIN iap_sessions sess ON ss.session_id = sess.id
             LEFT JOIN iap_psychometric_scores ps ON s.id = ps.student_id
             GROUP BY s.id
             ORDER BY s.created_at DESC";
@@ -820,7 +826,7 @@ if ($page == 'requests') {
                     ss.{$registration_date_column} AS registration_date
                  FROM iap_student_sessions ss
                  INNER JOIN iap_students st ON st.id = ss.student_id
-                 INNER JOIN sessions s ON s.id = ss.session_id";
+                 INNER JOIN iap_sessions s ON s.id = ss.session_id";
 
     $where_clause = "";
     $order_clause = " ORDER BY s.year ASC, s.{$session_title_column} ASC, ss.{$registration_date_column} " . ($registration_sort === 'oldest' ? 'ASC' : 'DESC');
@@ -885,7 +891,7 @@ if ($page == 'requests') {
     // Re-index for foreach rendering.
     $session_wise_registrations = array_values($session_wise_registrations);
 } else if ($page == 'manage_psychometric_questions') {
-    $psychometric_questions_result = $conn->query("SELECT id, question, option_a, option_b, option_c, option_d, correct_answer, created_at FROM psychometric_questions ORDER BY id DESC LIMIT 50");
+    $psychometric_questions_result = $conn->query("SELECT id, question, option_a, option_b, option_c, option_d, correct_answer, created_at FROM iap_psychometric_questions ORDER BY id DESC LIMIT 50");
 }
 ?>
 <!DOCTYPE html>
@@ -1605,7 +1611,7 @@ if ($page == 'requests') {
                     $total_students = $students_result->fetch_assoc()['count'] ?? 0;
                 }
 
-                $sessions_result = $conn->query("SELECT COUNT(*) as count FROM sessions");
+                $sessions_result = $conn->query("SELECT COUNT(*) as count FROM iap_sessions");
                 if ($sessions_result) {
                     $total_sessions = $sessions_result->fetch_assoc()['count'] ?? 0;
                 }

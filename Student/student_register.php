@@ -70,8 +70,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         } else {
             $conn->set_charset("utf8");
             
-            // Create IAP_students table if not exists
-            $create_table_sql = "CREATE TABLE IF NOT EXISTS IAP_students (
+            // Create iap_students table if not exists
+            $create_table_sql = "CREATE TABLE IF NOT EXISTS iap_students (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 roll_number VARCHAR(50) NOT NULL UNIQUE,
                 full_name VARCHAR(255) NOT NULL,
@@ -86,17 +86,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if (!$conn->query($create_table_sql)) {
                 $error_message = "Error creating table: " . $conn->error;
             } else {
-                // Create sessions table if not exists
-                $create_sessions_table_sql = "CREATE TABLE IF NOT EXISTS sessions (
+                // Create iap_sessions table if not exists
+                $create_sessions_table_sql = "CREATE TABLE IF NOT EXISTS iap_sessions (
                     id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    year ENUM('1', '2', '3', '4') NOT NULL,
+                    session_code VARCHAR(255) NULL,
+                    topic VARCHAR(255) NOT NULL,
+                    title VARCHAR(255) NULL,
+                    year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL,
                     description TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_sessions_session_code (session_code),
+                    INDEX idx_year (year),
+                    INDEX idx_created_at (created_at)
                 )";
                 
                 if (!$conn->query($create_sessions_table_sql)) {
-                    $error_message = "Error creating sessions table: " . $conn->error;
+                    $error_message = "Error creating iap_sessions table: " . $conn->error;
                 } else {
                     // Create iap_student_sessions table if not exists
                     $create_iap_student_sessions_sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
@@ -105,8 +110,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         session_id INT NOT NULL,
                         registration_status ENUM('registered', 'completed', 'dropped') DEFAULT 'registered',
                         registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (student_id) REFERENCES IAP_students(id) ON DELETE CASCADE,
-                        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                        FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+                        FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE,
                         UNIQUE KEY unique_student_session (student_id, session_id)
                     )";
                     
@@ -114,7 +119,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         $error_message = "Error creating iap_student_sessions table: " . $conn->error;
                     } else {
                         // Check if student already exists
-                        $check_sql = "SELECT id FROM IAP_students WHERE roll_number = ? OR email = ?";
+                        $check_sql = "SELECT id FROM iap_students WHERE roll_number = ? OR email = ?";
                         $check_stmt = $conn->prepare($check_sql);
                         
                         if (!$check_stmt) {
@@ -132,7 +137,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 $password_hash = password_hash($default_password, PASSWORD_BCRYPT);
                                 
                                 // Insert new student with default password and is_password_changed = 0
-                                $insert_sql = "INSERT INTO IAP_students (roll_number, full_name, email, department, year, password, is_password_changed) 
+                                $insert_sql = "INSERT INTO iap_students (roll_number, full_name, email, department, year, password, is_password_changed) 
                                               VALUES (?, ?, ?, ?, ?, ?, 0)";
                                 
                                 $insert_stmt = $conn->prepare($insert_sql);

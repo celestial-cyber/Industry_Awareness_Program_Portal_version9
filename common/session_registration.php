@@ -42,12 +42,12 @@ if ($unique_check && $unique_check->num_rows === 0) {
 }
 
 $session_title_column = 'topic';
-$title_col_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'title'");
+$title_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'title'");
 if ($title_col_check && $title_col_check->num_rows > 0) {
     $session_title_column = 'title';
 }
 
-$session_sql = "SELECT id, {$session_title_column} AS session_title, year FROM sessions WHERE id = ?";
+$session_sql = "SELECT id, {$session_title_column} AS session_title, year FROM iap_sessions WHERE id = ?";
 $session_stmt = $conn->prepare($session_sql);
 $session_stmt->bind_param("i", $session_id);
 $session_stmt->execute();

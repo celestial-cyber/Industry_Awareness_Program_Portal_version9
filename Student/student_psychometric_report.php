@@ -14,7 +14,7 @@ $student_id = $_SESSION['student_id'];
 // Fetch student's psychometric data
 $sql = "SELECT s.full_name, s.email, s.roll_number, s.department, s.year,
                ps.score, ps.trait_a, ps.trait_b, ps.trait_c, ps.trait_d, ps.completed_at
-        FROM IAP_students s
+        FROM iap_students s
         LEFT JOIN iap_psychometric_scores ps ON s.id = ps.student_id
         WHERE s.id = ?";
 

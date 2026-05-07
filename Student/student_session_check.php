@@ -20,7 +20,7 @@ require_once __DIR__ . '/../common/db.php';
 $conn->set_charset("utf8");
 
 // Verify that the student still exists in the database (security check)
-$sql = "SELECT id, roll_number, full_name FROM IAP_students WHERE id = ? AND roll_number = ?";
+        $sql = "SELECT id, roll_number, full_name FROM iap_students WHERE id = ? AND roll_number = ?";
 $stmt = $conn->prepare($sql);
 
 if (!$stmt) {
