@@ -44,7 +44,7 @@ $conn->query($sql);
 $sessions = [];
 $sessions_with_ids = [];
 for ($year = 1; $year <= 5; $year++) {
-    $sql = "SELECT id, topic FROM sessions WHERE year = ? ORDER BY created_at DESC";
+    $sql = "SELECT id, topic, session_code FROM sessions WHERE year = ? ORDER BY created_at DESC";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("s", $year);
     $stmt->execute();
@@ -895,57 +895,16 @@ document.addEventListener('click', () => {
     contextMenu.classList.remove('show');
 });
 
-// Session data for dynamic dropdown population
-const sessionsData = {
-    '1': [
-        {id: '1', title: 'Introduction to Engineering Careers'},
-        {id: '2', title: 'How to Ace Ideathons'},
-        {id: '3', title: 'What is Problem-Solving?'},
-        {id: '4', title: 'Emerging Technologies Overview'},
-        {id: '5', title: 'Soft Skills: Communication & Teamwork'},
-        {id: '6', title: 'College to Career Transition'},
-        {id: '7', title: 'Resume Building Basics'},
-        {id: '8', title: 'Industry Standards, Ethics & Workplace Communication'},
-        {id: '9', title: 'Roles, Responsibilities & Career Pathways in Industry'},
-        {id: '10', title: 'LinkedIn Profile Basics'}
-    ],
-    '2': [
-        {id: '11', title: 'Resume Building and Career Positioning'},
-        {id: '12', title: 'LinkedIn Mastery for Students'},
-        {id: '13', title: 'Interview Preparation Fundamentals'},
-        {id: '14', title: 'Presentation & Public Skills'},
-        {id: '15', title: 'Internship Success Strategy'},
-        {id: '16', title: 'Workplace Communication & Etiquette'},
-        {id: '17', title: 'Building your Personal Brand'},
-        {id: '18', title: 'Aptitude & Reasoning for Placements'},
-        {id: '19', title: 'Hackathon Success & Learning'},
-        {id: '20', title: 'Time Management, Company Opportunities & Certifications'}
-    ],
-    '3': [
-        {id: '21', title: 'Career Paths Beyond Campus Placements'},
-        {id: '22', title: 'Confidence Building in High-Pressure Situations'},
-        {id: '23', title: 'Project Presentation & Demo Skills'},
-        {id: '24', title: 'Internship to Full-Time Conversion'},
-        {id: '25', title: 'Salary Negotiation & Career Economics'},
-        {id: '26', title: 'Advanced Job Search Strategy & Placement Mastery'},
-        {id: '27', title: 'Core vs Non-Core Career Paths & Specialization'},
-        {id: '28', title: 'Advanced Interview Essentials & Preparation Strategy'},
-        {id: '29', title: 'GitHub Portfolio & Open Source Contribution'},
-        {id: '30', title: 'Managing Academics, Placements & Growth'}
-    ],
-    '4': [
-        {id: '31', title: 'Advanced System Design & Scalability'},
-        {id: '32', title: 'Specialization Deep Dive'},
-        {id: '33', title: 'Startup Ecosystem & Entrepreneurship'},
-        {id: '34', title: 'Research & Innovation in Engineering'},
-        {id: '35', title: 'Advanced Leadership & Management'},
-        {id: '36', title: 'Industry Certifications & Strategic Learning Roadmap'},
-        {id: '37', title: 'Global Opportunities & Remote Work'},
-        {id: '38', title: 'Real-World Project Development'},
-        {id: '39', title: 'Personal Branding & Personal Development'},
-        {id: '40', title: 'Alternative Paths & Contingency Planning'}
-    ]
-};
+// Session data for dynamic dropdown population (populated from database)
+const sessionsData = <?php echo json_encode(array_map(function($year_sessions) {
+    return array_map(function($session) {
+        return [
+            'id' => $session['id'],
+            'title' => $session['topic'],
+            'session_code' => $session['session_code'] ?? ''
+        ];
+    }, $year_sessions);
+}, $sessions_with_ids)); ?>;
 
 // Function to populate session dropdown based on selected year
 function populateSessions(year) {
@@ -957,7 +916,11 @@ function populateSessions(year) {
         sessionsData[year].forEach(session => {
             const option = document.createElement('option');
             option.value = session.id;
-            option.textContent = session.title;
+            // Display format: CODE - TITLE or just TITLE if no code
+            const displayText = session.session_code 
+                ? (session.session_code + ' - ' + session.title) 
+                : session.title;
+            option.textContent = displayText;
             sessionSelect.appendChild(option);
         });
     }

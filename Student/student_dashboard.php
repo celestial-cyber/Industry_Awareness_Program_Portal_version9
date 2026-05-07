@@ -1154,6 +1154,10 @@ if (isset($_POST['reset_password'])) {
                 <i class="fas fa-user-edit"></i> Edit Profile
             </a>
 
+            <a href="pronunciation.php" class="sidebar-link">
+                <i class="fas fa-microphone-alt"></i> Phonetics Practice
+            </a>
+
             <?php
             // Ensure psychometric scores table exists for student dashboard access
             $create_psychometric_scores_sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_scores (
@@ -1308,7 +1312,14 @@ if (isset($_POST['reset_password'])) {
                                     ?>
                                     <div class="session-card <?php echo $is_registered ? 'registered' : ''; ?>" style="background: <?php echo $is_registered ? '#f0fdf4' : '#ffffff'; ?>; border: 1px solid <?php echo $is_registered ? '#d1fae5' : '#e5e7eb'; ?>; border-radius: 12px; padding: 20px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                                         <div class="session-card-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                                            <h4 style="margin: 0; color: #1f2937;"><?php echo htmlspecialchars($session['title']); ?></h4>
+                                            <div>
+                                                <?php if ($session['session_code']): ?>
+                                                    <span style="background: #f3e8ff; color: #5b21b6; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; display: inline-block; margin-bottom: 8px;">
+                                                        <?php echo htmlspecialchars($session['session_code']); ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                                <h4 style="margin: 0; color: #1f2937;"><?php echo htmlspecialchars($session['title']); ?></h4>
+                                            </div>
                                             <span class="session-year-badge" style="background: #7c3aed; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
                                                 Year <?php echo htmlspecialchars($session['year']); ?>
                                             </span>
@@ -1399,7 +1410,14 @@ if (isset($_POST['reset_password'])) {
                                 <?php foreach ($year_sessions as $session): ?>
                                     <div class="progress-card" style="background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                                         <div class="progress-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                                            <h5 style="margin: 0; color: #1f2937;"><?php echo htmlspecialchars($session['title']); ?></h5>
+                                            <div>
+                                                <?php if ($session['session_code']): ?>
+                                                    <span style="background: #f3e8ff; color: #5b21b6; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; display: inline-block; margin-bottom: 8px;">
+                                                        <?php echo htmlspecialchars($session['session_code']); ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                                <h5 style="margin: 0; color: #1f2937;"><?php echo htmlspecialchars($session['title']); ?></h5>
+                                            </div>
                                             <span style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
                                                 <?php
                                                 switch($session['registration_status']) {

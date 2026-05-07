@@ -171,6 +171,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             margin-bottom: 15px;
         }
 
+        .back-home-wrap {
+            margin-top: 14px;
+            text-align: center;
+        }
+
+        .back-home-link {
+            display: inline-block;
+            color: #4c1d95;
+            font-weight: 600;
+            text-decoration: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: background 0.2s ease;
+        }
+
+        .back-home-link:hover {
+            background: #ede9fe;
+        }
+
         @media (max-width: 900px) {
             .hero-content {
                 flex-direction: column;
@@ -199,6 +218,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                         <button type="submit" class="login-btn">Login</button>
                     </form>
+                    <div class="back-home-wrap">
+                        <a href="../index.php" class="back-home-link">
+                            <i class="fas fa-arrow-left"></i> Back to Home
+                        </a>
+                    </div>
                 </div>
             </div>
 

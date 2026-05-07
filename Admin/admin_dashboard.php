@@ -49,6 +49,8 @@ $sql = "CREATE TABLE IF NOT EXISTS sessions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );";
 $conn->query($sql);
+// Ensure create-session form can store Graduate year without schema mismatch.
+$conn->query("ALTER TABLE sessions MODIFY year ENUM('1', '2', '3', '4', 'Graduate') NOT NULL");
 
 // Add structured session code column (idempotent migration).
 $session_code_column_check = $conn->query("SHOW COLUMNS FROM sessions LIKE 'session_code'");
@@ -169,6 +171,7 @@ $sql = 'INSERT IGNORE INTO iap_users_details (username, email, password, role) V
 $conn->query($sql);
 
 $message = '';
+$password_popup_message = '';
 $page = isset($_GET['page']) ? $_GET['page'] : 'home';
 $valid_years = ['1', '2', '3', '4', 'Graduate'];
 $valid_departments = ['Computer Science', 'Electronics', 'Mechanical', 'Electrical', 'Civil', 'AIML', 'Cybersecurity', 'Data Science', 'Other'];
@@ -294,19 +297,64 @@ function backfill_session_codes(mysqli $conn): void
 backfill_session_codes($conn);
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_session'])) {
-    $topic = $_POST['topic'];
-    $year = $_POST['year'];
-
-    $new_session_code = generate_next_session_code($conn, (string)$year);
-    $sql = "INSERT INTO sessions (session_code, topic, year) VALUES (?, ?, ?)";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("sss", $new_session_code, $topic, $year);
-    if ($stmt->execute()) {
-        $message = "Session created successfully! Code: " . htmlspecialchars($new_session_code);
-    } else {
-        $message = "Error: " . $conn->error;
+    $topic = trim($_POST['topic'] ?? '');
+    $year = trim($_POST['year'] ?? '');
+    $manual_session_code = trim($_POST['manual_session_code'] ?? '');
+    
+    $errors = [];
+    
+    // Validate topic
+    if (empty($topic)) {
+        $errors[] = "Session topic/name is required.";
     }
-    $stmt->close();
+    
+    // Validate year
+    if (empty($year)) {
+        $errors[] = "Academic year is required.";
+    }
+    
+    // Validate manual session code if provided
+    if (!empty($manual_session_code)) {
+        // Format: ALPHANUMERIC-SESSIONNAME
+        // Must contain hyphen and alphanumeric prefix
+        if (!preg_match('/^[A-Z0-9]+-[A-Za-z0-9\s]+$/', $manual_session_code)) {
+            $errors[] = "Session code must be in format: ALPHANUMERIC-SESSIONNAME (e.g., CS101-Introduction to Programming). Only letters, numbers, and hyphens allowed.";
+        } else {
+            // Check for duplicate session code
+            $check_sql = "SELECT id FROM sessions WHERE session_code = ? LIMIT 1";
+            $check_stmt = $conn->prepare($check_sql);
+            if ($check_stmt) {
+                $check_stmt->bind_param("s", $manual_session_code);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+                if ($check_result && $check_result->num_rows > 0) {
+                    $errors[] = "Session code already exists. Please use a unique code.";
+                }
+                $check_stmt->close();
+            }
+        }
+    }
+    
+    if (empty($errors)) {
+        // Use manual code if provided, otherwise auto-generate
+        $session_code = !empty($manual_session_code) ? $manual_session_code : generate_next_session_code($conn, (string)$year);
+        
+        $sql = "INSERT INTO sessions (session_code, topic, year) VALUES (?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("sss", $session_code, $topic, $year);
+        if ($stmt->execute()) {
+            $message = "Session created successfully! Code: " . htmlspecialchars($session_code);
+        } else {
+            if ($conn->errno === 1062) {
+                $message = "Error: Session code already exists. Please use a unique code.";
+            } else {
+                $message = "Error: " . $conn->error;
+            }
+        }
+        $stmt->close();
+    } else {
+        $message = implode("<br>", $errors);
+    }
 }
 
 // Handle approve action for session requests
@@ -349,6 +397,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_student'])) {
     $roll_number = strtoupper(trim($_POST['roll_number'] ?? ''));
     $department = trim($_POST['department'] ?? '');
     $year = trim($_POST['year'] ?? '');
+    $new_password = trim($_POST['new_password'] ?? '');
 
     $errors = [];
 
@@ -370,6 +419,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_student'])) {
     if ($student_id <= 0) {
         $errors[] = 'Invalid student record.';
     }
+    if ($new_password !== '' && strlen($new_password) < 8) {
+        $errors[] = 'New password must be at least 8 characters.';
+    }
 
     if (empty($errors)) {
         // Ensure email/roll_number remain unique across other students.
@@ -389,21 +441,52 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_student'])) {
     }
 
     if (empty($errors)) {
-        $sql = "UPDATE iap_students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ? WHERE id = ?";
+        $password_hash = '';
+        $should_update_password = $new_password !== '';
+        if ($should_update_password) {
+            $password_hash = password_hash($new_password, PASSWORD_BCRYPT);
+            if ($password_hash === false) {
+                $errors[] = 'Unable to process the new password.';
+            }
+        }
+    }
+
+    if (empty($errors)) {
+        if (!empty($should_update_password)) {
+            $sql = "UPDATE iap_students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ?, password = ?, is_password_changed = 1 WHERE id = ?";
+        } else {
+            $sql = "UPDATE iap_students SET full_name = ?, email = ?, roll_number = ?, department = ?, year = ? WHERE id = ?";
+        }
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("sssssi", $full_name, $email, $roll_number, $department, $year, $student_id);
+            if (!empty($should_update_password)) {
+                $stmt->bind_param("ssssssi", $full_name, $email, $roll_number, $department, $year, $password_hash, $student_id);
+            } else {
+                $stmt->bind_param("sssssi", $full_name, $email, $roll_number, $department, $year, $student_id);
+            }
             if ($stmt->execute()) {
-                $message = 'Student record updated successfully.';
+                $message = !empty($should_update_password) ? 'Student record and password updated successfully.' : 'Student record updated successfully.';
+                if (!empty($should_update_password)) {
+                    $password_popup_message = $message;
+                }
             } else {
                 $message = 'Error updating student: ' . $conn->error;
+                if (!empty($should_update_password)) {
+                    $password_popup_message = $message;
+                }
             }
             $stmt->close();
         } else {
             $message = 'Database error: ' . $conn->error;
+            if (!empty($should_update_password)) {
+                $password_popup_message = $message;
+            }
         }
     } else {
         $message = implode('<br>', $errors);
+        if ($new_password !== '') {
+            $password_popup_message = strip_tags($message);
+        }
     }
 }
 
@@ -581,6 +664,7 @@ if ($page == 'requests') {
                 s.roll_number,
                 s.department,
                 s.year,
+                s.password,
                 COUNT(DISTINCT ss.session_id) as sessions_count,
                 GROUP_CONCAT(DISTINCT CONCAT(COALESCE(sess.session_code, ''), CASE WHEN sess.session_code IS NULL OR sess.session_code = '' THEN '' ELSE ' - ' END, sess.{$session_title_column}) SEPARATOR ', ') as registered_sessions,
                 COALESCE(ps.score, 0) as iap_psychometric_score,
@@ -594,7 +678,7 @@ if ($page == 'requests') {
     $registered_students_result = $conn->query($sql);
     if (!$registered_students_result) {
         // Fallback query if the join fails
-        $sql = "SELECT id, full_name, email, roll_number, department, year FROM iap_students ORDER BY created_at DESC";
+        $sql = "SELECT id, full_name, email, roll_number, department, year, password FROM iap_students ORDER BY created_at DESC";
         $registered_students_result = $conn->query($sql);
         if (!$registered_students_result) {
             die("MySQL Error fetching registered students: " . $conn->error);
@@ -726,6 +810,7 @@ if ($page == 'requests') {
 
     $base_sql = "SELECT
                     s.id AS session_id,
+                    s.session_code,
                     CONCAT(COALESCE(s.session_code, ''), CASE WHEN s.session_code IS NULL OR s.session_code = '' THEN '' ELSE ' - ' END, s.{$session_title_column}) AS session_title,
                     s.year AS session_year,
                     st.full_name AS student_name,
@@ -781,6 +866,7 @@ if ($page == 'requests') {
             'registration_date' => $row['registration_date']
         ];
         $session_registration_rows[] = [
+            'session_code' => $row['session_code'] ?? '',
             'session_title' => $row['session_title'],
             'session_year' => $row['session_year'],
             'student_name' => $row['student_name'],
@@ -834,6 +920,11 @@ if ($page == 'requests') {
             background: #ffffff;
             border-right: 1px solid #e5e7eb;
             padding: 20px;
+            flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
         }
 
         .sidebar-logo {
@@ -882,6 +973,8 @@ if ($page == 'requests') {
         .main-content {
             flex: 1;
             padding: 40px;
+            min-width: 0;
+            overflow-x: hidden;
         }
 
         .header {
@@ -1107,6 +1200,79 @@ if ($page == 'requests') {
         .table-responsive {
             width: 100%;
             overflow-x: auto;
+        }
+
+        .registered-students-wrap {
+            width: 100%;
+            max-width: 100%;
+            overflow: hidden;
+        }
+
+        .registered-students-wrap .table-responsive {
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: #ffffff;
+            margin-bottom: 12px;
+        }
+
+        .registered-students-table {
+            min-width: 1200px;
+        }
+
+        .registered-students-table th,
+        .registered-students-table td {
+            white-space: nowrap;
+            padding: 12px 14px;
+            vertical-align: middle;
+        }
+
+        .password-mask {
+            letter-spacing: 1px;
+            font-weight: 700;
+            color: #6b7280;
+        }
+
+        .inline-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .mini-btn {
+            border: 1px solid #d1d5db;
+            background: #f9fafb;
+            color: #374151;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: 0.2s ease;
+        }
+
+        .mini-btn:hover {
+            background: #f3e8ff;
+            border-color: #c4b5fd;
+            color: #5b21b6;
+        }
+
+        .student-extra-row {
+            display: none;
+            background: #faf5ff;
+        }
+
+        .student-extra-row.active {
+            display: table-row;
+        }
+
+        .student-extra-content {
+            white-space: normal;
+            padding: 14px;
+            color: #374151;
         }
 
         .tab-nav {
@@ -1369,6 +1535,15 @@ if ($page == 'requests') {
                 width: 95%;
             }
 
+            .sidebar {
+                width: 220px;
+                flex-shrink: 0;
+            }
+
+            .main-content {
+                padding: 20px;
+            }
+
             th, td {
                 padding: 10px;
                 font-size: 13px;
@@ -1398,6 +1573,7 @@ if ($page == 'requests') {
                 <li><a href="?page=session_wise_registrations" class="<?php echo $page == 'session_wise_registrations' ? 'active' : ''; ?>">View Registered Sessions</a></li>
                 <li><a href="?page=psychometric_status" class="<?php echo $page == 'psychometric_status' ? 'active' : ''; ?>">Check Psychometric Status</a></li>
                 <li><a href="?page=manage_psychometric_questions" class="<?php echo $page == 'manage_psychometric_questions' ? 'active' : ''; ?>">Add Ques in Psychometric Quiz</a></li>
+                <li><a href="phonetics_progress.php">Phonetics Progress</a></li>
             </ul>
         </div>
 
@@ -1645,21 +1821,37 @@ if ($page == 'requests') {
 
             <?php elseif ($page == 'create_session'): ?>
                 <h2 class="section-title">Create New Session</h2>
+                <div style="background: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <p style="margin: 0; color: #0369a1; font-size: 14px;">
+                        <i class="fas fa-info-circle"></i> <strong>Session Code:</strong> Enter custom code (e.g., CS101-Introduction to Programming) or leave blank for auto-generation (YYSNNN format)
+                    </p>
+                </div>
                 <form method="post" action="">
                     <div class="form-group">
-                        <label for="topic">Topic:</label>
-                        <input type="text" id="topic" name="topic" required>
+                        <label for="topic">Session Topic/Name: <span style="color: #ef4444;">*</span></label>
+                        <input type="text" id="topic" name="topic" placeholder="e.g., Introduction to Engineering Careers" required>
                     </div>
                     <div class="form-group">
-                        <label for="year">Year:</label>
+                        <label for="manual_session_code">Session Code (Optional): <span style="color: #6b7280; font-weight: 400; font-size: 13px;">Format: ALPHANUMERIC-SESSIONNAME</span></label>
+                        <input type="text" id="manual_session_code" name="manual_session_code" placeholder="e.g., CS101-Introduction to Programming" pattern="^[A-Z0-9]+-[A-Za-z0-9\s]+$" title="Format: ALPHANUMERIC-SESSIONNAME (e.g., CS101-Introduction)">
+                        <small style="color: #6b7280; display: block; margin-top: 5px;">
+                            <i class="fas fa-lightbulb"></i> Leave blank to auto-generate code in YYSNNN format
+                        </small>
+                    </div>
+                    <div class="form-group">
+                        <label for="year">Academic Year: <span style="color: #ef4444;">*</span></label>
                         <select id="year" name="year" required>
+                            <option value="">-- Select Year --</option>
                             <option value="1">Year 1</option>
                             <option value="2">Year 2</option>
                             <option value="3">Year 3</option>
                             <option value="4">Year 4</option>
+                            <option value="Graduate">Graduate</option>
                         </select>
                     </div>
-                    <button type="submit" name="create_session" class="btn">Create Session</button>
+                    <button type="submit" name="create_session" class="btn">
+                        <i class="fas fa-plus"></i> Create Session
+                    </button>
                 </form>
 
             <?php elseif ($page == 'requests'): ?>
@@ -1820,8 +2012,9 @@ if ($page == 'requests') {
             <?php elseif ($page == 'registered_students'): ?>
                 <h2 class="section-title">Registered Students via Student Portal</h2>
                 <?php if ($registered_students_result && $registered_students_result->num_rows > 0): ?>
+                    <div class="registered-students-wrap">
                     <div class="table-responsive">
-                    <table>
+                    <table class="registered-students-table">
                         <thead>
                             <tr>
                                 <th>ID</th>
@@ -1830,12 +2023,11 @@ if ($page == 'requests') {
                                 <th>Roll Number</th>
                                 <th>Department</th>
                                 <th>Year</th>
+                                <th>Password</th>
                                 <th>Session Count</th>
-                                <th>Registered Sessions</th>
                                 <th>Psychometric Score</th>
                                 <th>Assessment Status</th>
-                                <th>Quizzes Taken</th>
-                                <th>Modules Completed</th>
+                                <th>More</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -1858,12 +2050,13 @@ if ($page == 'requests') {
                                     <td><?php echo htmlspecialchars($row['roll_number']); ?></td>
                                     <td><?php echo htmlspecialchars($row['department']); ?></td>
                                     <td><?php echo htmlspecialchars($row['year']) === 'Graduate' ? 'Graduate' : 'Year ' . htmlspecialchars($row['year']); ?></td>
-                                    <td><strong><?php echo $row['sessions_count'] ?? 0; ?></strong></td>
                                     <td>
-                                        <small><?php
-                                            echo $row['registered_sessions'] ? htmlspecialchars($row['registered_sessions']) : '<em>None</em>';
-                                        ?></small>
+                                        <div class="inline-actions">
+                                            <span class="password-mask">********</span>
+                                            <button type="button" class="mini-btn view-password-btn">View Password</button>
+                                        </div>
                                     </td>
+                                    <td><strong><?php echo $row['sessions_count'] ?? 0; ?></strong></td>
                                     <td>
                                         <span style="background: <?php echo $row['iap_psychometric_score'] > 0 ? '#dcfce7' : '#f3f4f6'; ?>; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: <?php echo $row['iap_psychometric_score'] > 0 ? '#166534' : '#6b7280'; ?>;">
                                             <?php echo $row['iap_psychometric_score'] > 0 ? round($row['iap_psychometric_score'], 1) . '%' : 'N/A'; ?>
@@ -1875,32 +2068,39 @@ if ($page == 'requests') {
                                         </span>
                                     </td>
                                     <td>
-                                        <!-- Dummy value: Random quiz count between 0-5 -->
-                                        <span style="background: #e0f7e0; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: #15803d;">
-                                            <?php echo rand(0, 5); ?>
-                                        </span>
+                                        <button type="button" class="mini-btn toggle-student-details-btn">View Details</button>
                                     </td>
                                     <td>
-                                        <!-- Dummy value: Random module count between 0-3 -->
-                                        <span style="background: #e0e7ff; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: #1e3a8a;">
-                                            <?php echo rand(0, 3); ?>
-                                        </span>
+                                        <div class="inline-actions">
+                                            <button type="button" class="action-btn edit-student-btn" 
+                                                data-id="<?php echo htmlspecialchars($row['id']); ?>"
+                                                data-full_name="<?php echo htmlspecialchars($row['full_name'], ENT_QUOTES); ?>"
+                                                data-email="<?php echo htmlspecialchars($row['email'], ENT_QUOTES); ?>"
+                                                data-roll_number="<?php echo htmlspecialchars($row['roll_number'], ENT_QUOTES); ?>"
+                                                data-department="<?php echo htmlspecialchars($row['department'], ENT_QUOTES); ?>"
+                                                data-year="<?php echo htmlspecialchars($row['year'], ENT_QUOTES); ?>">
+                                                Edit
+                                            </button>
+                                            <button type="button" class="mini-btn reset-password-btn">Reset Password</button>
+                                        </div>
                                     </td>
-                                    <td>
-                                        <button type="button" class="action-btn edit-student-btn" 
-                                            data-id="<?php echo htmlspecialchars($row['id']); ?>"
-                                            data-full_name="<?php echo htmlspecialchars($row['full_name'], ENT_QUOTES); ?>"
-                                            data-email="<?php echo htmlspecialchars($row['email'], ENT_QUOTES); ?>"
-                                            data-roll_number="<?php echo htmlspecialchars($row['roll_number'], ENT_QUOTES); ?>"
-                                            data-department="<?php echo htmlspecialchars($row['department'], ENT_QUOTES); ?>"
-                                            data-year="<?php echo htmlspecialchars($row['year'], ENT_QUOTES); ?>">
-                                            Edit
-                                        </button>
+                                </tr>
+                                <tr class="student-extra-row">
+                                    <td colspan="12" class="student-extra-content">
+                                        <strong>Registered Sessions:</strong>
+                                        <?php echo $row['registered_sessions'] ? htmlspecialchars($row['registered_sessions']) : 'None'; ?>
+                                        &nbsp; | &nbsp;
+                                        <strong>Quizzes Taken:</strong>
+                                        <?php echo rand(0, 5); ?>
+                                        &nbsp; | &nbsp;
+                                        <strong>Modules Completed:</strong>
+                                        <?php echo rand(0, 3); ?>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
                         </tbody>
                     </table>
+                    </div>
                     </div>
                 <?php else: ?>
                     <p class="no-data">No students registered yet through the student portal.</p>
@@ -1961,6 +2161,11 @@ if ($page == 'requests') {
                                 <input type="email" id="editEmail" name="email" required>
                             </div>
 
+                            <div class="form-group">
+                                <label for="editNewPassword">New Password (optional)</label>
+                                <input type="password" id="editNewPassword" name="new_password" minlength="8" placeholder="Leave blank to keep current password">
+                            </div>
+
                             <div class="modal-buttons">
                                 <button type="submit" class="btn-save">Save Changes</button>
                                 <button type="button" class="btn-cancel" id="cancelEditStudent">Cancel</button>
@@ -2009,6 +2214,7 @@ if ($page == 'requests') {
                                 <table>
                                     <thead>
                                         <tr>
+                                            <th>Session Code</th>
                                             <th>Session Title</th>
                                             <th>Session Year</th>
                                             <th>Student Name</th>
@@ -2024,6 +2230,7 @@ if ($page == 'requests') {
                                     <tbody>
                                         <?php foreach ($session_registration_rows as $student_item): ?>
                                             <tr>
+                                                <td><span style="background: #f3e8ff; color: #5b21b6; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 12px;"><?php echo htmlspecialchars($student_item['session_code'] ?? 'N/A'); ?></span></td>
                                                 <td><?php echo htmlspecialchars($student_item['session_title']); ?></td>
                                                 <td><?php echo htmlspecialchars($student_item['session_year']); ?></td>
                                                 <td><?php echo htmlspecialchars($student_item['student_name']); ?></td>
@@ -2308,6 +2515,7 @@ if ($page == 'requests') {
             const rollField = document.getElementById('editRollNumber');
             const deptField = document.getElementById('editDepartment');
             const yearField = document.getElementById('editYear');
+            const newPasswordField = document.getElementById('editNewPassword');
 
             if (!modal || !form) {
                 return;
@@ -2330,6 +2538,9 @@ if ($page == 'requests') {
                 rollField.value = button.dataset.roll_number || '';
                 deptField.value = button.dataset.department || '';
                 yearField.value = button.dataset.year || '';
+                if (newPasswordField) {
+                    newPasswordField.value = '';
+                }
             }
 
             editButtons.forEach(function (button) {
@@ -2355,7 +2566,47 @@ if ($page == 'requests') {
             });
 
             attachRollNumberValidation(form, 'editRollNumber', 'rollNumberError');
+
+            document.querySelectorAll('.view-password-btn').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    alert('Password cannot be viewed. You can reset it.');
+                });
+            });
+
+            document.querySelectorAll('.toggle-student-details-btn').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    const currentRow = button.closest('tr');
+                    const detailsRow = currentRow ? currentRow.nextElementSibling : null;
+                    if (!detailsRow || !detailsRow.classList.contains('student-extra-row')) {
+                        return;
+                    }
+                    const isExpanded = detailsRow.classList.contains('active');
+                    detailsRow.classList.toggle('active');
+                    button.textContent = isExpanded ? 'View Details' : 'Hide Details';
+                });
+            });
+
+            document.querySelectorAll('.reset-password-btn').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    const currentRow = button.closest('tr');
+                    const editButton = currentRow ? currentRow.querySelector('.edit-student-btn') : null;
+                    if (!editButton) {
+                        return;
+                    }
+                    fillFormFromButton(editButton);
+                    openModal();
+                    if (newPasswordField) {
+                        newPasswordField.focus();
+                    }
+                });
+            });
         })();
+    </script>
+    <?php endif; ?>
+
+    <?php if ($password_popup_message !== ''): ?>
+    <script>
+        alert(<?php echo json_encode($password_popup_message); ?>);
     </script>
     <?php endif; ?>
 </body>
