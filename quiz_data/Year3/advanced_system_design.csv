@@ -1,0 +1,21 @@
+year,module,question,option_a,option_b,option_c,option_d,correct_answer
+3rd Year,Advanced System Design,What is 'Scalability'?,How heavy a system is,The ability of a system to handle a growing amount of work,The color of the servers,The age of the code,B
+3rd Year,Advanced System Design,What is 'Load Balancing'?,Balancing on one leg,Distributing network or application traffic across multiple servers,Turning off the server,Buying more power,B
+3rd Year,Advanced System Design,What is 'Latency'?,The weight of the data,The delay before a transfer of data begins following an instruction,The speed of the fan,The cost of the software,B
+3rd Year,Advanced System Design,What is 'Sharding' in databases?,Breaking the database,Horizontal partitioning of data in a database or search engine,Deleting the data,Naming the data,B
+3rd Year,Advanced System Design,What is 'Microservices Architecture'?,One giant program,An architectural style that structures an application as a collection of services,A small computer,A type of internet connection,B
+3rd Year,Advanced System Design,What is 'Caching'?,Earning money,Storing copies of data in a temporary storage location for faster access,Hiding data,Deleting old files,B
+3rd Year,Advanced System Design,What does 'CAP Theorem' stand for?,"Consistency, Availability, Partition Tolerance","Computer, Access, Power","Code, Application, Program","Capacity, Accuracy, Performance",A
+3rd Year,Advanced System Design,What is 'Availability' in a system?,If the system is free to use,The percentage of time a system is operational and accessible,The number of employees,The size of the server room,B
+3rd Year,Advanced System Design,What is 'Horizontal Scaling'?,Making the server taller,Adding more machines to your pool of resources,Buying a faster CPU,Upgrading the RAM,B
+3rd Year,Advanced System Design,What is 'Vertical Scaling'?,Adding more machines,"Adding more power (CPU, RAM) to an existing machine",Building a taller building,Moving the office,B
+3rd Year,Advanced System Design,What is a 'Message Queue'?,A line for people,A form of asynchronous service-to-service communication,A text message app,An error message,B
+3rd Year,Advanced System Design,What is 'NoSQL'?,No money for SQL,A non-tabular database that stores data differently than relational tables,A broken database,A type of internet,B
+3rd Year,Advanced System Design,What is 'Redundancy' in system design?,Repeating words,The duplication of critical components to increase reliability,An unnecessary feature,A type of code,B
+3rd Year,Advanced System Design,What is 'Content Delivery Network' (CDN)?,A TV station,A geographically distributed group of servers which work together to provide fast delivery of Internet content,A delivery service for food,A type of network cable,B
+3rd Year,Advanced System Design,What is 'Database Replication'?,Creating a new database,The process of storing the same data in multiple locations to improve availability,Deleting the database,Naming the tables,B
+3rd Year,Advanced System Design,What is a 'Reverse Proxy'?,A fake person,A type of proxy server that retrieves resources on behalf of a client from one or more servers,An internet error,A way to speed up your laptop,B
+3rd Year,Advanced System Design,What is 'Event-Driven Architecture'?,An architecture for parties,A software architecture paradigm promoting the production and consumption of events,A calendar app,A new building,B
+3rd Year,Advanced System Design,What is 'Fault Tolerance'?,Being very nice to others,The property that enables a system to continue operating properly in the event of the failure of some of its components,The speed of the system,The cost of the repairs,B
+3rd Year,Advanced System Design,What is 'API Gateway'?,A door to the office,A server that is the single entry point into a system (especially microservices),A new programming language,A type of firewall,B
+3rd Year,Advanced System Design,What is 'Throughput'?,Going through a door,The amount of data moved successfully from one place to another in a given time period,The size of a file,The number of users,B

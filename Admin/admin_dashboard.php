@@ -13,6 +13,76 @@ if (file_exists($composer_autoload)) {
 
 require_once __DIR__ . '/../common/db.php';
 
+// Check and create English quiz tables if they don't exist
+$english_tables = [
+    'english_quiz_requests' => "CREATE TABLE IF NOT EXISTS english_quiz_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_id INT NOT NULL,
+        difficulty ENUM('easy', 'medium', 'hard') NOT NULL,
+        status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at TIMESTAMP NULL,
+        reviewed_by INT NULL,
+        admin_note VARCHAR(255) NULL,
+        INDEX idx_status (status),
+        INDEX idx_student (student_id),
+        INDEX idx_difficulty (difficulty)
+    )",
+    'english_quiz_attempts' => "CREATE TABLE IF NOT EXISTS english_quiz_attempts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_id INT NOT NULL,
+        difficulty ENUM('easy', 'medium', 'hard') NOT NULL,
+        request_id INT NULL,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP NULL,
+        time_taken_seconds INT NULL,
+        INDEX idx_student (student_id),
+        INDEX idx_difficulty (difficulty),
+        INDEX idx_request (request_id)
+    )",
+    'english_quiz_answers' => "CREATE TABLE IF NOT EXISTS english_quiz_answers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        attempt_id INT NOT NULL,
+        topic VARCHAR(255) NOT NULL,
+        question TEXT NOT NULL,
+        option_a VARCHAR(500) NOT NULL,
+        option_b VARCHAR(500) NOT NULL,
+        option_c VARCHAR(500) NOT NULL,
+        option_d VARCHAR(500) NOT NULL,
+        selected_answer ENUM('A', 'B', 'C', 'D') NULL,
+        correct_answer ENUM('A', 'B', 'C', 'D') NOT NULL,
+        is_correct TINYINT(1) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_attempt (attempt_id)
+    )",
+    'english_quiz_results' => "CREATE TABLE IF NOT EXISTS english_quiz_results (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        attempt_id INT NOT NULL UNIQUE,
+        student_id INT NOT NULL,
+        difficulty ENUM('easy', 'medium', 'hard') NOT NULL,
+        total_questions INT NOT NULL,
+        correct_answers INT NOT NULL,
+        score INT NOT NULL,
+        percentage DECIMAL(5,2) NOT NULL,
+        topics_covered TEXT NULL,
+        attempt_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_student (student_id),
+        INDEX idx_difficulty (difficulty),
+        INDEX idx_attempt_date (attempt_date)
+    )"
+];
+
+foreach ($english_tables as $table_name => $create_sql) {
+    $table_check = $conn->query("SHOW TABLES LIKE '$table_name'");
+    if (!$table_check || $table_check->num_rows == 0) {
+        if ($conn->query($create_sql)) {
+            error_log("Created English quiz table: $table_name");
+        } else {
+            error_log("Error creating English quiz table '$table_name': " . $conn->error);
+        }
+    }
+}
+
 // Create tables if not exist
 $sql = "CREATE TABLE IF NOT EXISTS iap_users_details (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -146,6 +216,102 @@ $sql = "CREATE TABLE IF NOT EXISTS iap_student_sessions (
     FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE
 );";
 $conn->query($sql);
+$approval_status_check = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'approval_status'");
+if ($approval_status_check && $approval_status_check->num_rows === 0) {
+    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN approval_status ENUM('pending','approved','rejected') DEFAULT 'pending' AFTER session_id");
+}
+$registration_status_check = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'registration_status'");
+if ($registration_status_check && $registration_status_check->num_rows === 0) {
+    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN registration_status ENUM('registered','completed','dropped') DEFAULT 'registered' AFTER approval_status");
+}
+$conn->query("UPDATE iap_student_sessions SET approval_status = 'approved' WHERE approval_status IS NULL");
+
+$sql = "CREATE TABLE IF NOT EXISTS quiz_questions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    session_id INT NOT NULL,
+    year ENUM('1','2','3','4','Graduate') NOT NULL,
+    module VARCHAR(255) NOT NULL,
+    question TEXT NOT NULL,
+    option_a VARCHAR(500) NOT NULL,
+    option_b VARCHAR(500) NOT NULL,
+    option_c VARCHAR(500) NOT NULL,
+    option_d VARCHAR(500) NOT NULL,
+    correct_answer ENUM('A','B','C','D') NOT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_session_id (session_id),
+    INDEX idx_year (year),
+    INDEX idx_module (module),
+    CONSTRAINT fk_quiz_question_session FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS quiz_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL,
+    session_id INT NOT NULL,
+    status ENUM('pending','approved','rejected') DEFAULT 'pending',
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP NULL,
+    reviewed_by INT NULL,
+    admin_note VARCHAR(255) NULL,
+    UNIQUE KEY uq_student_session_request (student_id, session_id),
+    INDEX idx_status (status),
+    INDEX idx_student (student_id),
+    INDEX idx_session (session_id),
+    CONSTRAINT fk_quiz_request_student FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quiz_request_session FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quiz_request_admin FOREIGN KEY (reviewed_by) REFERENCES iap_users_details(id) ON DELETE SET NULL
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS quiz_attempts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL,
+    session_id INT NOT NULL,
+    request_id INT NULL,
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_student (student_id),
+    INDEX idx_session (session_id),
+    CONSTRAINT fk_quiz_attempt_student FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quiz_attempt_session FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quiz_attempt_request FOREIGN KEY (request_id) REFERENCES quiz_requests(id) ON DELETE SET NULL
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS quiz_answers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    attempt_id INT NOT NULL,
+    question_id INT NOT NULL,
+    selected_answer ENUM('A','B','C','D') NULL,
+    is_correct TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_attempt (attempt_id),
+    INDEX idx_question (question_id),
+    CONSTRAINT fk_quiz_answer_attempt FOREIGN KEY (attempt_id) REFERENCES quiz_attempts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quiz_answer_question FOREIGN KEY (question_id) REFERENCES quiz_questions(id) ON DELETE CASCADE
+);";
+$conn->query($sql);
+
+$sql = "CREATE TABLE IF NOT EXISTS quiz_results (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    attempt_id INT NOT NULL UNIQUE,
+    student_id INT NOT NULL,
+    session_id INT NOT NULL,
+    total_questions INT NOT NULL,
+    correct_answers INT NOT NULL,
+    score INT NOT NULL,
+    percentage DECIMAL(5,2) NOT NULL,
+    attempt_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_student (student_id),
+    INDEX idx_session (session_id),
+    INDEX idx_attempt_date (attempt_date),
+    CONSTRAINT fk_quiz_result_attempt FOREIGN KEY (attempt_id) REFERENCES quiz_attempts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quiz_result_student FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quiz_result_session FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE
+);";
+$conn->query($sql);
 
 // Table for managing psychometric quiz questions.
 $sql = "CREATE TABLE IF NOT EXISTS iap_psychometric_questions (
@@ -187,6 +353,11 @@ $session_registration_rows = [];
 $session_title_column = 'topic';
 $registration_year_filter = '';
 $registration_sort = 'latest';
+$quiz_perf_year = '';
+$quiz_perf_session = 0;
+$quiz_perf_student_name = '';
+$quiz_perf_roll = '';
+$quiz_perf_sessions = [];
 
 $title_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'title'");
 if ($title_col_check && $title_col_check->num_rows > 0) {
@@ -394,6 +565,39 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['reject_request'])) {
     }
     $stmt->close();
 }
+
+/**
+ * Import module-wise quiz MCQs from CSV.
+ * CSV headers expected:
+ * Topic,Difficulty,Question,Option A,Option B,Option C,Option D,Correct Answer
+ */
+ 
+
+// Handle module quiz approval status updates for student enrollments.
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_module_approval'])) {
+    $student_id = intval($_POST['student_id'] ?? 0);
+    $session_id = intval($_POST['session_id'] ?? 0);
+    $approval_status = trim($_POST['approval_status'] ?? '');
+    $allowed_approval = ['pending', 'approved', 'rejected'];
+
+    if ($student_id > 0 && $session_id > 0 && in_array($approval_status, $allowed_approval, true)) {
+        $upd_sql = "UPDATE iap_student_sessions SET approval_status = ? WHERE student_id = ? AND session_id = ?";
+        $upd_stmt = $conn->prepare($upd_sql);
+        if ($upd_stmt) {
+            $upd_stmt->bind_param("sii", $approval_status, $student_id, $session_id);
+            if ($upd_stmt->execute()) {
+                $message = "Module access status updated to " . htmlspecialchars($approval_status) . ".";
+            } else {
+                $message = "Failed to update module access status.";
+            }
+            $upd_stmt->close();
+        }
+    } else {
+        $message = "Invalid module access update request.";
+    }
+}
+
+// Quiz approval logic removed - no approval needed
 
 // Handle admin student update action from the registered students section.
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_student'])) {
@@ -820,9 +1024,11 @@ if ($page == 'requests') {
                     CONCAT(COALESCE(s.session_code, ''), CASE WHEN s.session_code IS NULL OR s.session_code = '' THEN '' ELSE ' - ' END, s.{$session_title_column}) AS session_title,
                     s.year AS session_year,
                     st.full_name AS student_name,
+                    st.id AS student_id,
                     st.roll_number,
                     st.department,
                     st.email,
+                    ss.approval_status,
                     ss.{$registration_date_column} AS registration_date
                  FROM iap_student_sessions ss
                  INNER JOIN iap_students st ON st.id = ss.student_id
@@ -863,16 +1069,20 @@ if ($page == 'requests') {
         }
         $session_wise_registrations[$group_key]['students'][] = [
             'student_name' => $row['student_name'],
+            'student_id' => (int)$row['student_id'],
             'roll_number' => $row['roll_number'],
             'year' => $row['session_year'],
             'department' => $row['department'],
             'email' => $row['email'],
             'session_desired' => $row['session_title'],
             'other_query' => '',
+            'approval_status' => $row['approval_status'] ?? 'pending',
             'registration_date' => $row['registration_date']
         ];
         $session_registration_rows[] = [
             'session_code' => $row['session_code'] ?? '',
+            'session_id' => (int)$row['session_id'],
+            'student_id' => (int)$row['student_id'],
             'session_title' => $row['session_title'],
             'session_year' => $row['session_year'],
             'student_name' => $row['student_name'],
@@ -882,6 +1092,7 @@ if ($page == 'requests') {
             'email' => $row['email'],
             'session_desired' => $row['session_title'],
             'other_query' => '',
+            'approval_status' => $row['approval_status'] ?? 'pending',
             'registration_date' => $row['registration_date']
         ];
         $session_wise_registrations[$group_key]['total_registered']++;
@@ -890,6 +1101,77 @@ if ($page == 'requests') {
 
     // Re-index for foreach rendering.
     $session_wise_registrations = array_values($session_wise_registrations);
+} else if ($page == 'module_quiz_performance') {
+    $quiz_perf_year = trim($_GET['quiz_year'] ?? '');
+    if (!in_array($quiz_perf_year, ['', '1', '2', '3', '4', 'Graduate'], true)) {
+        $quiz_perf_year = '';
+    }
+    $quiz_perf_session = intval($_GET['quiz_session_id'] ?? 0);
+    $quiz_perf_student_name = trim($_GET['quiz_student_name'] ?? '');
+    $quiz_perf_roll = trim($_GET['quiz_roll_number'] ?? '');
+
+    $session_list_sql = "SELECT id, year, {$session_title_column} AS title, session_code FROM iap_sessions ORDER BY year ASC, {$session_title_column} ASC";
+    $session_list_result = $conn->query($session_list_sql);
+    if ($session_list_result) {
+        while ($srow = $session_list_result->fetch_assoc()) {
+            $quiz_perf_sessions[] = $srow;
+        }
+    }
+
+    $perf_sql = "SELECT
+                    qa.id,
+                    st.full_name,
+                    st.roll_number,
+                    s.{$session_title_column} AS module_name,
+                    s.session_code,
+                    s.year,
+                    qa.score,
+                    qa.percentage,
+                    qa.total_questions,
+                    qa.correct_answers,
+                    qa.attempt_date AS attempted_at
+                 FROM quiz_results qa
+                 INNER JOIN iap_students st ON st.id = qa.student_id
+                 INNER JOIN iap_sessions s ON s.id = qa.session_id
+                 WHERE 1=1";
+    $types = '';
+    $params = [];
+    if ($quiz_perf_year !== '') {
+        $perf_sql .= " AND s.year = ?";
+        $types .= 's';
+        $params[] = $quiz_perf_year;
+    }
+    if ($quiz_perf_session > 0) {
+        $perf_sql .= " AND s.id = ?";
+        $types .= 'i';
+        $params[] = $quiz_perf_session;
+    }
+    if ($quiz_perf_student_name !== '') {
+        $perf_sql .= " AND st.full_name LIKE ?";
+        $types .= 's';
+        $params[] = '%' . $quiz_perf_student_name . '%';
+    }
+    if ($quiz_perf_roll !== '') {
+        $perf_sql .= " AND st.roll_number LIKE ?";
+        $types .= 's';
+        $params[] = '%' . $quiz_perf_roll . '%';
+    }
+    $perf_sql .= " ORDER BY qa.attempt_date DESC, qa.id DESC";
+
+    $quiz_performance_stmt = $conn->prepare($perf_sql);
+    if ($quiz_performance_stmt) {
+        if ($types !== '') {
+            $bind_values = [];
+            $bind_values[] = &$types;
+            foreach ($params as $k => $v) {
+                $bind_values[] = &$params[$k];
+            }
+            call_user_func_array([$quiz_performance_stmt, 'bind_param'], $bind_values);
+        }
+        $quiz_performance_stmt->execute();
+        $quiz_performance_result = $quiz_performance_stmt->get_result();
+        $quiz_performance_stmt->close();
+    }
 } else if ($page == 'manage_psychometric_questions') {
     $psychometric_questions_result = $conn->query("SELECT id, question, option_a, option_b, option_c, option_d, correct_answer, created_at FROM iap_psychometric_questions ORDER BY id DESC LIMIT 50");
 }
@@ -914,6 +1196,7 @@ if ($page == 'requests') {
             background: #fbfcff;
             color: #374151;
             line-height: 1.6;
+            overflow-x: hidden;
         }
 
         .dashboard {
@@ -931,6 +1214,30 @@ if ($page == 'requests') {
             top: 0;
             height: 100vh;
             overflow-y: auto;
+            z-index: 1200;
+            transition: transform 0.28s ease;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            z-index: 1150;
+        }
+
+        .mobile-sidebar-toggle {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            background: #ffffff;
+            color: #5b21b6;
+            cursor: pointer;
+            margin-right: 12px;
         }
 
         .sidebar-logo {
@@ -988,6 +1295,11 @@ if ($page == 'requests') {
             justify-content: space-between;
             align-items: center;
             margin-bottom: 30px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
         }
 
         .logout-btn {
@@ -1504,6 +1816,34 @@ if ($page == 'requests') {
             flex: 1;
         }
 
+        @media (max-width: 991.98px) {
+            .mobile-sidebar-toggle {
+                display: inline-flex;
+            }
+
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                height: 100vh;
+                width: 250px;
+                transform: translateX(-100%);
+                box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+            }
+
+            body.sidebar-open .sidebar {
+                transform: translateX(0);
+            }
+
+            body.sidebar-open .sidebar-overlay {
+                display: block;
+            }
+
+            .main-content {
+                padding: 20px;
+            }
+        }
+
         @media (max-width: 768px) {
             .stats-grid {
                 grid-template-columns: 1fr;
@@ -1541,11 +1881,6 @@ if ($page == 'requests') {
                 width: 95%;
             }
 
-            .sidebar {
-                width: 220px;
-                flex-shrink: 0;
-            }
-
             .main-content {
                 padding: 20px;
             }
@@ -1560,7 +1895,8 @@ if ($page == 'requests') {
 </head>
 <body>
     <div class="dashboard">
-        <div class="sidebar">
+        <div class="sidebar-overlay" id="adminSidebarOverlay"></div>
+        <div class="sidebar" id="adminSidebar">
             <div class="sidebar-logo">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <img src="../images/SA Main logo.jpg" alt="SA Main Logo" title="SA Main">
@@ -1577,6 +1913,8 @@ if ($page == 'requests') {
                 <li><a href="?page=requests" class="<?php echo $page == 'requests' ? 'active' : ''; ?>">View Session Requests</a></li>
                 <li><a href="?page=registered_students" class="<?php echo $page == 'registered_students' ? 'active' : ''; ?>">View Registered Students</a></li>
                 <li><a href="?page=session_wise_registrations" class="<?php echo $page == 'session_wise_registrations' ? 'active' : ''; ?>">View Registered Sessions</a></li>
+                <li><a href="?page=module_quiz_performance" class="<?php echo $page == 'module_quiz_performance' ? 'active' : ''; ?>">Module Quiz Performance</a></li>
+                <li><a href="?page=english_quiz_performance" class="<?php echo $page == 'english_quiz_performance' ? 'active' : ''; ?>">English Quiz Performance</a></li>
                 <li><a href="?page=psychometric_status" class="<?php echo $page == 'psychometric_status' ? 'active' : ''; ?>">Check Psychometric Status</a></li>
                 <li><a href="?page=manage_psychometric_questions" class="<?php echo $page == 'manage_psychometric_questions' ? 'active' : ''; ?>">Add Ques in Psychometric Quiz</a></li>
                 <li><a href="phonetics_progress.php">Phonetics Progress</a></li>
@@ -1585,7 +1923,12 @@ if ($page == 'requests') {
 
         <div class="main-content">
             <div class="header">
-                <h1>Dashboard</h1>
+                <div class="header-left">
+                    <button type="button" class="mobile-sidebar-toggle" id="adminSidebarToggle" aria-label="Toggle sidebar" aria-controls="adminSidebar" aria-expanded="false">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1>Dashboard</h1>
+                </div>
                 <a href="../logout.php" class="logout-btn">Logout</a>
             </div>
 
@@ -2230,6 +2573,8 @@ if ($page == 'requests') {
                                             <th>Email</th>
                                             <th>Session Desired</th>
                                             <th>Query</th>
+                                            <th>Quiz Access</th>
+                                            <th>Action</th>
                                             <th>Registration Date</th>
                                         </tr>
                                     </thead>
@@ -2246,6 +2591,36 @@ if ($page == 'requests') {
                                                 <td><?php echo htmlspecialchars($student_item['email']); ?></td>
                                                 <td><?php echo htmlspecialchars($student_item['session_desired']); ?></td>
                                                 <td><?php echo !empty($student_item['other_query']) ? htmlspecialchars($student_item['other_query']) : 'N/A'; ?></td>
+                                                <td>
+                                                    <?php
+                                                    $approval = $student_item['approval_status'] ?? 'N/A';
+                                                    $badge_bg = '#f3f4f6';
+                                                    $badge_color = '#6b7280';
+                                                    if ($approval === 'approved') { $badge_bg = '#dcfce7'; $badge_color = '#166534'; }
+                                                    if ($approval === 'pending') { $badge_bg = '#fef3c7'; $badge_color = '#92400e'; }
+                                                    if ($approval === 'rejected') { $badge_bg = '#fee2e2'; $badge_color = '#991b1b'; }
+                                                    ?>
+                                                    <span style="background: <?php echo $badge_bg; ?>; color: <?php echo $badge_color; ?>; padding: 4px 8px; border-radius: 4px; font-weight: 600;">
+                                                        <?php echo htmlspecialchars(ucfirst((string)$approval)); ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <?php if (!empty($student_item['student_id']) && !empty($student_item['session_id'])): ?>
+                                                        <form method="POST" action="?page=session_wise_registrations" style="display:flex; gap:6px; align-items:center;">
+                                                            <input type="hidden" name="update_module_approval" value="1">
+                                                            <input type="hidden" name="student_id" value="<?php echo (int)$student_item['student_id']; ?>">
+                                                            <input type="hidden" name="session_id" value="<?php echo (int)$student_item['session_id']; ?>">
+                                                            <select name="approval_status" class="form-control" style="min-width:120px; padding:6px 8px;">
+                                                                <option value="pending" <?php echo ($approval === 'pending') ? 'selected' : ''; ?>>Pending</option>
+                                                                <option value="approved" <?php echo ($approval === 'approved') ? 'selected' : ''; ?>>Approved</option>
+                                                                <option value="rejected" <?php echo ($approval === 'rejected') ? 'selected' : ''; ?>>Rejected</option>
+                                                            </select>
+                                                            <button type="submit" class="mini-btn">Save</button>
+                                                        </form>
+                                                    <?php else: ?>
+                                                        <span style="color:#9ca3af;">N/A</span>
+                                                    <?php endif; ?>
+                                                </td>
                                                 <td><?php echo !empty($student_item['registration_date']) ? htmlspecialchars(date('M j, Y g:i A', strtotime($student_item['registration_date']))) : 'N/A'; ?></td>
                                             </tr>
                                         <?php endforeach; ?>
@@ -2256,6 +2631,202 @@ if ($page == 'requests') {
                     </div>
                 <?php else: ?>
                     <p class="no-data">No registrations found.</p>
+                <?php endif; ?>
+            <?php elseif ($page == 'english_quiz_performance'): ?>
+                <h2 class="section-title">English Quiz Performance</h2>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <form method="GET" action="" style="display:grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 12px; align-items:end;">
+                            <input type="hidden" name="page" value="english_quiz_performance">
+                            <div>
+                                <label for="english_difficulty"><strong>Difficulty</strong></label>
+                                <select id="english_difficulty" name="english_difficulty" class="form-control">
+                                    <option value="">All</option>
+                                    <option value="easy" <?php echo ($english_perf_difficulty === 'easy') ? 'selected' : ''; ?>>Easy</option>
+                                    <option value="medium" <?php echo ($english_perf_difficulty === 'medium') ? 'selected' : ''; ?>>Medium</option>
+                                    <option value="hard" <?php echo ($english_perf_difficulty === 'hard') ? 'selected' : ''; ?>>Hard</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="english_student_name"><strong>Student Name</strong></label>
+                                <input type="text" id="english_student_name" name="english_student_name" class="form-control" value="<?php echo htmlspecialchars($english_perf_student_name); ?>">
+                            </div>
+                            <div>
+                                <label for="english_roll_number"><strong>Roll Number</strong></label>
+                                <input type="text" id="english_roll_number" name="english_roll_number" class="form-control" value="<?php echo htmlspecialchars($english_perf_roll); ?>">
+                            </div>
+                            <div>
+                                <button type="submit" class="btn btn-primary"><i class="fas fa-filter"></i> Filter</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <?php 
+                // Fetch English quiz performance
+                $english_perf_difficulty = trim($_GET['english_difficulty'] ?? '');
+                $english_perf_student_name = trim($_GET['english_student_name'] ?? '');
+                $english_perf_roll = trim($_GET['english_roll_number'] ?? '');
+                
+                $english_perf_sql = "SELECT
+                    eqr.id,
+                    st.full_name,
+                    st.roll_number,
+                    eqr.difficulty,
+                    eqr.score,
+                    eqr.percentage,
+                    eqr.total_questions,
+                    eqr.correct_answers,
+                    eqr.attempt_date AS attempted_at,
+                    eqr.topics_covered
+                 FROM english_quiz_results eqr
+                 INNER JOIN iap_students st ON st.id = eqr.student_id
+                 WHERE 1=1";
+                
+                $params = [];
+                $types = '';
+                
+                if ($english_perf_difficulty !== '' && in_array($english_perf_difficulty, ['easy', 'medium', 'hard'])) {
+                    $english_perf_sql .= " AND eqr.difficulty = ?";
+                    $params[] = $english_perf_difficulty;
+                    $types .= 's';
+                }
+                
+                if ($english_perf_student_name !== '') {
+                    $english_perf_sql .= " AND st.full_name LIKE ?";
+                    $params[] = '%' . $english_perf_student_name . '%';
+                    $types .= 's';
+                }
+                
+                if ($english_perf_roll !== '') {
+                    $english_perf_sql .= " AND st.roll_number LIKE ?";
+                    $params[] = '%' . $english_perf_roll . '%';
+                    $types .= 's';
+                }
+                
+                $english_perf_sql .= " ORDER BY eqr.attempt_date DESC";
+                
+                $english_perf_stmt = $conn->prepare($english_perf_sql);
+                if ($english_perf_stmt && !empty($params)) {
+                    $english_perf_stmt->bind_param($types, ...$params);
+                    $english_perf_stmt->execute();
+                    $english_perf_result = $english_perf_stmt->get_result();
+                    $english_perf_stmt->close();
+                }
+                ?>
+                <?php if (isset($english_perf_result) && $english_perf_result && $english_perf_result->num_rows > 0): ?>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Student Name</th>
+                                    <th>Roll Number</th>
+                                    <th>Difficulty</th>
+                                    <th>Score</th>
+                                    <th>Percentage</th>
+                                    <th>Attempt Date</th>
+                                    <th>Topics Covered</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php while($eperf = $english_perf_result->fetch_assoc()): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($eperf['full_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($eperf['roll_number']); ?></td>
+                                        <td>
+                                            <?php
+                                            $difficultyClass = $eperf['difficulty'] === 'easy' ? 'success' : ($eperf['difficulty'] === 'medium' ? 'warning' : 'danger');
+                                            ?>
+                                            <span class="badge bg-<?php echo $difficultyClass; ?>">
+                                                <?php echo ucfirst($eperf['difficulty']); ?>
+                                            </span>
+                                        </td>
+                                        <td><?php echo htmlspecialchars($eperf['score'] . '/' . $eperf['total_questions']); ?></td>
+                                        <td><?php echo htmlspecialchars(number_format((float)$eperf['percentage'], 2)); ?>%</td>
+                                        <td><?php echo htmlspecialchars(date('M j, Y g:i A', strtotime($eperf['attempted_at']))); ?></td>
+                                        <td><small><?php echo htmlspecialchars(substr($eperf['topics_covered'], 0, 100)); ?></small></td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <p class="no-data">No English quiz attempts found for selected filters.</p>
+                <?php endif; ?>
+            <?php elseif ($page == 'module_quiz_performance'): ?>
+                <h2 class="section-title">Module Quiz Performance</h2>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <form method="GET" action="" style="display:grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px; align-items:end;">
+                            <input type="hidden" name="page" value="module_quiz_performance">
+                            <div>
+                                <label for="quiz_year"><strong>Year</strong></label>
+                                <select id="quiz_year" name="quiz_year" class="form-control">
+                                    <option value="">All</option>
+                                    <option value="1" <?php echo $quiz_perf_year === '1' ? 'selected' : ''; ?>>1</option>
+                                    <option value="2" <?php echo $quiz_perf_year === '2' ? 'selected' : ''; ?>>2</option>
+                                    <option value="3" <?php echo $quiz_perf_year === '3' ? 'selected' : ''; ?>>3</option>
+                                    <option value="4" <?php echo $quiz_perf_year === '4' ? 'selected' : ''; ?>>4</option>
+                                    <option value="Graduate" <?php echo $quiz_perf_year === 'Graduate' ? 'selected' : ''; ?>>Graduate</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="quiz_session_id"><strong>Module</strong></label>
+                                <select id="quiz_session_id" name="quiz_session_id" class="form-control">
+                                    <option value="0">All Modules</option>
+                                    <?php foreach ($quiz_perf_sessions as $sess): ?>
+                                        <option value="<?php echo (int)$sess['id']; ?>" <?php echo ($quiz_perf_session === (int)$sess['id']) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars(($sess['session_code'] ? $sess['session_code'] . ' - ' : '') . $sess['title']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="quiz_student_name"><strong>Student Name</strong></label>
+                                <input type="text" id="quiz_student_name" name="quiz_student_name" class="form-control" value="<?php echo htmlspecialchars($quiz_perf_student_name); ?>">
+                            </div>
+                            <div>
+                                <label for="quiz_roll_number"><strong>Roll Number</strong></label>
+                                <input type="text" id="quiz_roll_number" name="quiz_roll_number" class="form-control" value="<?php echo htmlspecialchars($quiz_perf_roll); ?>">
+                            </div>
+                            <div>
+                                <button type="submit" class="btn btn-primary"><i class="fas fa-filter"></i> Filter</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <?php if (isset($quiz_performance_result) && $quiz_performance_result && $quiz_performance_result->num_rows > 0): ?>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Student Name</th>
+                                    <th>Roll Number</th>
+                                    <th>Module</th>
+                                    <th>Year</th>
+                                    <th>Score</th>
+                                    <th>Percentage</th>
+                                    <th>Attempt Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php while($prow = $quiz_performance_result->fetch_assoc()): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($prow['full_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($prow['roll_number']); ?></td>
+                                        <td><?php echo htmlspecialchars(($prow['session_code'] ? $prow['session_code'] . ' - ' : '') . $prow['module_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($prow['year']); ?></td>
+                                        <td><?php echo htmlspecialchars($prow['score'] . '/' . $prow['total_questions']); ?></td>
+                                        <td><?php echo htmlspecialchars(number_format((float)$prow['percentage'], 2)); ?>%</td>
+                                        <td><?php echo htmlspecialchars(date('M j, Y g:i A', strtotime($prow['attempted_at']))); ?></td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <p class="no-data">No quiz attempts found for selected filters.</p>
                 <?php endif; ?>
             <?php elseif ($page == 'manage_psychometric_questions'): ?>
                 <h2 class="section-title">Manage Psychometric Questions</h2>
@@ -2609,6 +3180,42 @@ if ($page == 'requests') {
         })();
     </script>
     <?php endif; ?>
+
+    <script>
+        (function () {
+            const toggleBtn = document.getElementById('adminSidebarToggle');
+            const sidebar = document.getElementById('adminSidebar');
+            const overlay = document.getElementById('adminSidebarOverlay');
+            const mq = window.matchMedia('(max-width: 991.98px)');
+            if (!toggleBtn || !sidebar || !overlay) return;
+
+            function closeSidebar() {
+                document.body.classList.remove('sidebar-open');
+                toggleBtn.setAttribute('aria-expanded', 'false');
+            }
+
+            toggleBtn.addEventListener('click', function () {
+                const isOpen = document.body.classList.toggle('sidebar-open');
+                toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+
+            overlay.addEventListener('click', closeSidebar);
+
+            sidebar.querySelectorAll('a').forEach(function (link) {
+                link.addEventListener('click', function () {
+                    if (mq.matches) {
+                        closeSidebar();
+                    }
+                });
+            });
+
+            window.addEventListener('resize', function () {
+                if (!mq.matches) {
+                    closeSidebar();
+                }
+            });
+        })();
+    </script>
 
     <?php if ($password_popup_message !== ''): ?>
     <script>

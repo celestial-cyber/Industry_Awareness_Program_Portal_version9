@@ -78,6 +78,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             background: #fbfcff;
             color: #374151;
             line-height: 1.6;
+            overflow-x: hidden;
         }
 
         .container {
@@ -116,6 +117,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             width: 100%;
             max-width: 420px;
             border-radius: 16px;
+            height: auto;
+            display: block;
         }
 
         .login-form {
@@ -194,6 +197,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             .hero-content {
                 flex-direction: column;
                 text-align: center;
+                gap: 28px;
+            }
+
+            .hero-image {
+                order: -1;
+            }
+
+            .hero {
+                padding: 40px 0;
+                min-height: auto;
+                align-items: flex-start;
             }
         }
     </style>

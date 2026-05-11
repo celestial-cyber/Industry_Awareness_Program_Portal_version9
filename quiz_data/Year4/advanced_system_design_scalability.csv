@@ -1,0 +1,21 @@
+year,module,question,option_a,option_b,option_c,option_d,correct_answer
+4th Year,Advanced System Design & Scalability,Which architectural pattern is best for extreme horizontal scalability?,Monolithic,Microservices,Serverless,Layered,B
+4th Year,Advanced System Design & Scalability,What does the 'P' stand for in CAP theorem?,Partition Tolerance,Persistence,Performance,Portability,A
+4th Year,Advanced System Design & Scalability,Which mechanism prevents a downstream service from being overwhelmed?,Load Balancing,Circuit Breaker,Caching,Indexing,B
+4th Year,Advanced System Design & Scalability,"In database sharding, what is a 'hot key'?",A secure encryption key,A shard that receives disproportionately high traffic,The primary key of a table,A cached value,B
+4th Year,Advanced System Design & Scalability,What is the primary benefit of 'Consistent Hashing'?,Faster encryption,Minimizing data movement when nodes are added/removed,Perfectly even data distribution,Reducing storage space,B
+4th Year,Advanced System Design & Scalability,Which tool is commonly used as a distributed message queue?,Redis,Apache Kafka,MySQL,NGINX,B
+4th Year,Advanced System Design & Scalability,What is 'Vertical Scaling'?,Adding more servers,Adding more RAM/CPU to an existing server,Optimizing code,Database replication,B
+4th Year,Advanced System Design & Scalability,What is the 'Backpressure' strategy used for?,Cooling data centers,Slowing down producers when consumers are overwhelmed,Speeding up network traffic,Encrypting database logs,B
+4th Year,Advanced System Design & Scalability,Which protocol is typically used for low-latency bi-directional communication?,HTTP 1.1,WebSockets,FTP,SMTP,B
+4th Year,Advanced System Design & Scalability,What is a 'Reverse Proxy'?,A client-side cache,A server that retrieves resources for a client from backend servers,A type of database,A firewall hardware,B
+4th Year,Advanced System Design & Scalability,Which consistency model ensures all nodes see the same data at the same time?,Eventual Consistency,Strong Consistency,Casual Consistency,Weak Consistency,B
+4th Year,Advanced System Design & Scalability,What is 'Latency'?,Number of requests per second,Time taken for a single request-response cycle,System storage capacity,Network bandwidth,B
+4th Year,Advanced System Design & Scalability,What is 'Read-after-write' consistency?,Reading data before it is written,Ability to view latest data immediately after update,Writing data twice,Caching read requests,B
+4th Year,Advanced System Design & Scalability,Which layer does a Content Delivery Network (CDN) primarily optimize?,Data Link Layer,Network Layer,Application Layer (edge),Physical Layer,C
+4th Year,Advanced System Design & Scalability,What is 'Statelessness' in REST architecture?,No database is used,Server doesn't store client session context,The client has no state,The API is always offline,B
+4th Year,Advanced System Design & Scalability,What is the primary purpose of 'Leader Election' in distributed systems?,Hiring a manager,Designating a node to coordinate tasks,Voting for a feature,Scaling the UI,B
+4th Year,Advanced System Design & Scalability,Which data structure is most efficient for implementing a cache with LRU policy?,Array,Hash Map + Doubly Linked List,Binary Search Tree,Stack,B
+4th Year,Advanced System Design & Scalability,What is 'Write-through' caching?,Writing data only to the cache,Writing data to cache and database simultaneously,Writing data only to database,Skipping the cache,B
+4th Year,Advanced System Design & Scalability,What is a 'Sticky Session'?,A long meeting,Routing a user to the same server for a session,A session that never expires,A blocked user account,B
+4th Year,Advanced System Design & Scalability,What is 'Throughput'?,The speed of light,Total work performed over a period of time,The size of a database row,The weight of a server,B

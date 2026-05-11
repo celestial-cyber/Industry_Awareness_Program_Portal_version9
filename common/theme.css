@@ -54,6 +54,18 @@ body {
     font-family: var(--font-family);
     color: var(--text-dark);
     background: var(--bg-light);
+    overflow-x: hidden;
+}
+
+img {
+    max-width: 100%;
+    height: auto;
+}
+
+.table-responsive-custom {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 /* ==================== Gradients ==================== */
@@ -604,6 +616,10 @@ body {
 
     .table-custom {
         font-size: 12px;
+    }
+
+    .table-responsive-custom .table-custom {
+        min-width: 640px;
     }
 
     .table-custom thead th,

@@ -1,0 +1,21 @@
+year,module,question,option_a,option_b,option_c,option_d,correct_answer
+4th Year,Real-World Project Development,What is the 'SDLC'?,Software Design Life Cycle,Software Development Life Cycle,System Deployment Life Cycle,Standard Development Logic Cycle,B
+4th Year,Real-World Project Development,What is 'Agile' methodology?,A fast way to run,An iterative approach to software development and project management,"A rigid, step-by-step process",Designing the whole system at once,B
+4th Year,Real-World Project Development,What is 'Scrum'?,A game of rugby,A framework within Agile for managing complex projects,A type of code,A technical meeting only,B
+4th Year,Real-World Project Development,What is 'Version Control'?,Changing the software name,"The practice of tracking and managing changes to software code (e.g., Git)",Controlling the speed of the app,Naming the files,B
+4th Year,Real-World Project Development,What is 'CI/CD'?,Continuous Integration / Continuous Deployment,Computer Integration / Code Design,Central Interface / Constant Deployment,Continuous Input / Constant Code,A
+4th Year,Real-World Project Development,What is 'Code Review'?,Reviewing a movie about coding,Examination of computer source code by other developers,Checking for typos only,The final stage before deleting the code,B
+4th Year,Real-World Project Development,What is a 'Sprint' in Scrum?,A fast running race,"A fixed period (e.g., 2 weeks) during which specific work is completed",A type of computer hardware,A long meeting,B
+4th Year,Real-World Project Development,What is 'Unit Testing'?,Testing the whole system at once,Testing individual components or functions of the code,Testing the physical computer,A test for students,B
+4th Year,Real-World Project Development,What is 'Documentation'?,A list of doctors,Written text that accompanies software and explains how it works,A collection of photos,A movie about the project,B
+4th Year,Real-World Project Development,What is 'Scalability'?,The weight of the software,The capability of a system to handle a growing amount of work,The height of the servers,The color of the code,B
+4th Year,Real-World Project Development,What is 'Technical Debt'?,Owing money to a vendor,The future cost of rework caused by choosing an easy (but messy) solution now,The price of the software license,A bank loan for the project,B
+4th Year,Real-World Project Development,What is 'UX Design'?,User Experience design,User Expense design,Universal Experiment design,Under-Xray design,A
+4th Year,Real-World Project Development,What is a 'Stakeholder'?,Someone who cooks steak,Any person or group with an interest in the success of the project,A team member only,A competitor,B
+4th Year,Real-World Project Development,What is 'Refactoring'?,Building a new factory,Restructuring existing code without changing its external behavior,Changing the whole project goal,Deleting the code,B
+4th Year,Real-World Project Development,What is 'Deployment'?,Thinking about the code,Moving code from a development environment to a production environment,Writing the code,Testing the code,B
+4th Year,Real-World Project Development,What is an 'MVP'?,Most Valued Person,Minimum Viable Product,Main Visual Piece,Multi-Variable Program,B
+4th Year,Real-World Project Development,What is 'Bug Tracking'?,Catching actual insects,"The process of identifying, logging, and managing errors in software",Counting the number of users,Testing the internet speed,B
+4th Year,Real-World Project Development,What is 'Open Source'?,A door left open,"Software with source code that anyone can inspect, modify, and enhance",Free software with no support,Software made by one person,B
+4th Year,Real-World Project Development,What is 'QA'?,Quality Assurance,Quick Assessment,Quality Analysis,Quantity Allowance,A
+4th Year,Real-World Project Development,What is 'Requirement Gathering'?,Collecting money,The process of identifying the needs and goals of a project from stakeholders,Buying more computers,Hiring more developers,B

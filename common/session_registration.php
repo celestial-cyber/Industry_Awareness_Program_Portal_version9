@@ -36,6 +36,11 @@ $col_registration_status = $conn->query("SHOW COLUMNS FROM iap_student_sessions 
 if ($col_registration_status && $col_registration_status->num_rows === 0) {
     $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN registration_status ENUM('registered','completed','dropped') DEFAULT 'registered' AFTER session_year");
 }
+$col_approval_status = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'approval_status'");
+if ($col_approval_status && $col_approval_status->num_rows === 0) {
+    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN approval_status ENUM('pending','approved','rejected') DEFAULT 'pending' AFTER registration_status");
+}
+$conn->query("UPDATE iap_student_sessions SET approval_status = 'approved' WHERE approval_status IS NULL");
 $unique_check = $conn->query("SHOW INDEX FROM iap_student_sessions WHERE Key_name = 'unique_student_session'");
 if ($unique_check && $unique_check->num_rows === 0) {
     $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
@@ -73,7 +78,7 @@ if (!$allowed) {
     exit();
 }
 
-$insert_sql = "INSERT INTO iap_student_sessions (student_id, session_id, session_year, registration_status) VALUES (?, ?, ?, 'registered')";
+$insert_sql = "INSERT INTO iap_student_sessions (student_id, session_id, session_year, registration_status, approval_status) VALUES (?, ?, ?, 'registered', 'pending')";
 $insert_stmt = $conn->prepare($insert_sql);
 if (!$insert_stmt) {
     $conn->close();

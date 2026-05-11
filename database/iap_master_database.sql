@@ -217,6 +217,80 @@ VALUES
 (4, 8, 'registered');
 
 -- ============================================================================
+-- Step 15: English Quiz System Tables
+-- ============================================================================
+
+-- English Quiz Requests Table
+CREATE TABLE IF NOT EXISTS english_quiz_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL,
+    difficulty ENUM('easy', 'medium', 'hard') NOT NULL,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP NULL,
+    reviewed_by INT NULL,
+    admin_note VARCHAR(255) NULL,
+    INDEX idx_status (status),
+    INDEX idx_student (student_id),
+    INDEX idx_difficulty (difficulty),
+    CONSTRAINT fk_english_quiz_request_student FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    CONSTRAINT fk_english_quiz_request_admin FOREIGN KEY (reviewed_by) REFERENCES iap_users_details(id) ON DELETE SET NULL
+);
+
+-- English Quiz Attempts Table
+CREATE TABLE IF NOT EXISTS english_quiz_attempts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL,
+    difficulty ENUM('easy', 'medium', 'hard') NOT NULL,
+    request_id INT NULL,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL,
+    time_taken_seconds INT NULL,
+    INDEX idx_student (student_id),
+    INDEX idx_difficulty (difficulty),
+    INDEX idx_request (request_id),
+    CONSTRAINT fk_english_attempt_student FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE,
+    CONSTRAINT fk_english_attempt_request FOREIGN KEY (request_id) REFERENCES english_quiz_requests(id) ON DELETE SET NULL
+);
+
+-- English Quiz Answers Table
+CREATE TABLE IF NOT EXISTS english_quiz_answers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    attempt_id INT NOT NULL,
+    topic VARCHAR(255) NOT NULL,
+    question TEXT NOT NULL,
+    option_a VARCHAR(500) NOT NULL,
+    option_b VARCHAR(500) NOT NULL,
+    option_c VARCHAR(500) NOT NULL,
+    option_d VARCHAR(500) NOT NULL,
+    selected_answer ENUM('A', 'B', 'C', 'D') NULL,
+    correct_answer ENUM('A', 'B', 'C', 'D') NOT NULL,
+    is_correct TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_attempt (attempt_id),
+    CONSTRAINT fk_english_answer_attempt FOREIGN KEY (attempt_id) REFERENCES english_quiz_attempts(id) ON DELETE CASCADE
+);
+
+-- English Quiz Results Table
+CREATE TABLE IF NOT EXISTS english_quiz_results (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    attempt_id INT NOT NULL UNIQUE,
+    student_id INT NOT NULL,
+    difficulty ENUM('easy', 'medium', 'hard') NOT NULL,
+    total_questions INT NOT NULL,
+    correct_answers INT NOT NULL,
+    score INT NOT NULL,
+    percentage DECIMAL(5,2) NOT NULL,
+    topics_covered TEXT NULL,
+    attempt_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_student (student_id),
+    INDEX idx_difficulty (difficulty),
+    INDEX idx_attempt_date (attempt_date),
+    CONSTRAINT fk_english_result_attempt FOREIGN KEY (attempt_id) REFERENCES english_quiz_attempts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_english_result_student FOREIGN KEY (student_id) REFERENCES iap_students(id) ON DELETE CASCADE
+);
+
+-- ============================================================================
 -- Step 14: Verification Queries
 -- ============================================================================
 -- Run these to verify everything was created correctly

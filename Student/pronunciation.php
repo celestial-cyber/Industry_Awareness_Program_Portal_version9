@@ -28,6 +28,7 @@ require_once 'student_session_check.php';
             line-height: 1.6;
             margin: 0;
             padding: 0;
+            overflow-x: hidden;
         }
 
         .dashboard-sidebar {
@@ -41,6 +42,30 @@ require_once 'student_session_check.php';
             height: calc(100vh - 70px);
             overflow-y: auto;
             box-shadow: var(--shadow);
+            z-index: 1200;
+            transition: transform 0.28s ease;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            z-index: 1150;
+        }
+
+        .mobile-sidebar-toggle {
+            display: none;
+            border: 1px solid rgba(255, 255, 255, 0.45);
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin-right: 10px;
         }
 
         .sidebar-logo {
@@ -118,13 +143,33 @@ require_once 'student_session_check.php';
         .record-status { font-size: 0.83rem; color: #6b7280; min-height: 20px; }
         .record-status.recording { color: #dc2626; font-weight: 600; }
         @media (max-width: 991.98px) {
-            .dashboard-sidebar { position: static; width: 100%; border-right: 0; border-bottom: 1px solid #e5e7eb; height: auto; top: 0; }
+            .mobile-sidebar-toggle { display: inline-flex; }
+            .dashboard-sidebar {
+                width: 260px;
+                position: fixed;
+                left: 0;
+                top: 70px;
+                height: calc(100vh - 70px);
+                border-right: 1px solid #e5e7eb;
+                border-bottom: 0;
+                transform: translateX(-100%);
+                box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+            }
+            body.sidebar-open .dashboard-sidebar { transform: translateX(0); }
+            body.sidebar-open .sidebar-overlay { display: block; }
             .main-dashboard-content { margin-left: 0; }
+        }
+        @media (max-width: 768px) {
+            .dashboard-sidebar {
+                top: 64px;
+                height: calc(100vh - 64px);
+            }
         }
     </style>
 </head>
 <body>
-    <div class="dashboard-sidebar">
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <div class="dashboard-sidebar" id="studentSidebar">
         <div class="sidebar-logo">
             <div style="display:flex; align-items:center; gap:12px;">
                 <img src="../images/SA%20Main%20logo.jpg" alt="SA Main Logo" title="SA Main">
@@ -149,6 +194,9 @@ require_once 'student_session_check.php';
     <div class="main-dashboard-content">
         <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
             <div class="container-fluid">
+                <button type="button" class="mobile-sidebar-toggle" id="mobileSidebarToggle" aria-label="Toggle sidebar" aria-controls="studentSidebar" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
                 <a class="navbar-brand" href="student_dashboard.php"><i class="fas fa-graduation-cap me-2"></i>IAP Student Portal</a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
                 <div class="collapse navbar-collapse" id="navbarNav">
@@ -175,6 +223,34 @@ require_once 'student_session_check.php';
     </div>
 
     <script>
+        (function () {
+            const sidebarToggleBtn = document.getElementById('mobileSidebarToggle');
+            const sidebarOverlay = document.getElementById('sidebarOverlay');
+            const sidebar = document.getElementById('studentSidebar');
+            const mobileSidebarMq = window.matchMedia('(max-width: 991.98px)');
+            if (!sidebarToggleBtn || !sidebarOverlay || !sidebar) return;
+
+            function closeSidebar() {
+                document.body.classList.remove('sidebar-open');
+                sidebarToggleBtn.setAttribute('aria-expanded', 'false');
+            }
+
+            sidebarToggleBtn.addEventListener('click', function() {
+                const isOpen = document.body.classList.toggle('sidebar-open');
+                sidebarToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+
+            sidebarOverlay.addEventListener('click', closeSidebar);
+            sidebar.querySelectorAll('a').forEach(function(link) {
+                link.addEventListener('click', function() {
+                    if (mobileSidebarMq.matches) closeSidebar();
+                });
+            });
+            window.addEventListener('resize', function() {
+                if (!mobileSidebarMq.matches) closeSidebar();
+            });
+        })();
+
         const phonemes = [
             { symbol: "n", type: "consonant", file: "PhoneticFlashCards/ipa_audio/consonants/Alveolar_nasal_n.ogg.mp3", example: "nice" },
             { symbol: "m", type: "consonant", file: "PhoneticFlashCards/ipa_audio/consonants/Bilabial_nasal_m.ogg.mp3", example: "man" },

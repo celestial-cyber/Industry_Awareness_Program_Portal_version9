@@ -188,6 +188,7 @@ $conn->close();
             background: #fbfcff;
             color: #374151;
             line-height: 1.6;
+            overflow-x: hidden;
         }
 
         html {
@@ -256,6 +257,7 @@ $conn->close();
             text-decoration: none;
             color: #374151;
             font-weight: 500;
+            display: inline-block;
         }
 
         .nav-links a:hover {
@@ -469,70 +471,16 @@ $conn->close();
 
 /* Session Context Menu */
 .session-item {
-    position: relative;
     display: flex;
-    justify-content: space-between;
     align-items: center;
     padding: 8px 12px;
     border-radius: 6px;
     transition: background-color 0.2s;
-    cursor: pointer;
 }
 
 .session-item:hover {
     background-color: #f3e8ff;
 }
-
-.session-menu-icon {
-    opacity: 0;
-    cursor: pointer;
-    font-weight: bold;
-    color: #7c3aed;
-    transition: opacity 0.2s;
-}
-
-.session-item:hover .session-menu-icon {
-    opacity: 1;
-}
-
-/* Context Menu Styles */
-.session-context-menu {
-    position: fixed;
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    z-index: 10000;
-    min-width: 200px;
-    display: none;
-}
-
-.session-context-menu.show {
-    display: block;
-}
-
-.session-context-menu-item {
-    padding: 12px 16px;
-    cursor: pointer;
-    color: #374151;
-    border-bottom: 1px solid #f3f4f6;
-    transition: all 0.2s;
-}
-
-.session-context-menu-item:last-child {
-    border-bottom: none;
-}
-
-.session-context-menu-item:hover {
-    background-color: #f3e8ff;
-    color: #7c3aed;
-    font-weight: 600;
-}
-
-.session-context-menu-item i {
-    margin-right: 8px;
-}
-
 
 /* Registration Form */
 .registration-form {
@@ -604,6 +552,93 @@ $conn->close();
 
     /* Responsive modal adjustments */
     @media (max-width: 768px) {
+        .header-content {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .logo-block {
+            width: 100%;
+            align-items: flex-start;
+        }
+
+        .assoc-logo {
+            width: 110px;
+            border-radius: 20px;
+        }
+
+        .assoc-name {
+            font-size: 20px;
+        }
+
+        .assoc-tagline {
+            font-size: 15px;
+        }
+
+        .nav-links {
+            width: 100%;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 10px;
+        }
+
+        .nav-links a {
+            margin-left: 0;
+            font-size: 14px;
+        }
+
+        .hero {
+            padding: 40px 0;
+        }
+
+        .hero-content {
+            gap: 28px;
+            align-items: flex-start;
+        }
+
+        .hero-text h2 {
+            font-size: 30px;
+        }
+
+        .hero-desc {
+            font-size: 20px;
+        }
+
+        .hero-buttons {
+            flex-direction: column;
+            align-items: stretch;
+            width: 100%;
+        }
+
+        .primary-btn,
+        .secondary-btn {
+            width: 100%;
+            text-align: center;
+            font-size: 16px;
+        }
+
+        .year-grid {
+            gap: 16px;
+        }
+
+        .year-card {
+            padding: 20px;
+        }
+
+        .session-list li {
+            word-break: break-word;
+        }
+
+        .registration-form button {
+            align-self: stretch;
+        }
+
+        .footer {
+            margin-top: 24px;
+            padding: 14px 0;
+        }
+
         .modal-content {
             margin: 1% auto !important;
             width: 95% !important;
@@ -613,6 +648,26 @@ $conn->close();
         .modal-body {
             min-height: 250px !important;
             padding: 15px !important;
+        }
+
+        .modal {
+            z-index: 2000 !important;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .container {
+            width: 94%;
+        }
+
+        .hero-text h2,
+        .section-title {
+            font-size: 25px;
+        }
+
+        .hero-desc {
+            font-size: 18px;
+            line-height: 1.5;
         }
     }
     </style>
@@ -690,7 +745,6 @@ $conn->close();
                     <?php foreach ($sessions_with_ids[1] as $session): ?>
                         <li class="session-item" data-session-id="<?php echo $session['id']; ?>" data-session-topic="<?php echo htmlspecialchars($session['topic']); ?>">
                             <?php echo htmlspecialchars($session['topic']); ?>
-                            <span class="session-menu-icon" title="Right-click for options">⋮</span>
                         </li>
                     <?php endforeach; ?>
                 </ul>
@@ -716,7 +770,6 @@ $conn->close();
                     <?php foreach ($sessions_with_ids[2] as $session): ?>
                         <li class="session-item" data-session-id="<?php echo $session['id']; ?>" data-session-topic="<?php echo htmlspecialchars($session['topic']); ?>">
                             <?php echo htmlspecialchars($session['topic']); ?>
-                            <span class="session-menu-icon" title="Right-click for options">⋮</span>
                         </li>
                     <?php endforeach; ?>
                 </ul>
@@ -741,7 +794,6 @@ $conn->close();
                     <?php foreach ($sessions_with_ids[3] as $session): ?>
                         <li class="session-item" data-session-id="<?php echo $session['id']; ?>" data-session-topic="<?php echo htmlspecialchars($session['topic']); ?>">
                             <?php echo htmlspecialchars($session['topic']); ?>
-                            <span class="session-menu-icon" title="Right-click for options">⋮</span>
                         </li>
                     <?php endforeach; ?>
                 </ul>
@@ -766,7 +818,6 @@ $conn->close();
                     <?php foreach ($sessions_with_ids[4] as $session): ?>
                         <li class="session-item" data-session-id="<?php echo $session['id']; ?>" data-session-topic="<?php echo htmlspecialchars($session['topic']); ?>">
                             <?php echo htmlspecialchars($session['topic']); ?>
-                            <span class="session-menu-icon" title="Right-click for options">⋮</span>
                         </li>
                     <?php endforeach; ?>
                 </ul>
@@ -919,88 +970,6 @@ document.querySelectorAll('.toggle-sessions').forEach(button => {
             button.textContent = "Hide Details";
         }
     });
-});
-
-// Context Menu for Session Registration
-const contextMenu = document.createElement('div');
-contextMenu.className = 'session-context-menu';
-contextMenu.innerHTML = `
-    <div class="session-context-menu-item register-for-session">
-        <i class="fas fa-user-plus"></i> Register for this Session
-    </div>
-    <div class="session-context-menu-item view-session-info">
-        <i class="fas fa-info-circle"></i> Session Info
-    </div>
-`;
-document.body.appendChild(contextMenu);
-
-let currentSessionId = null;
-let currentSessionTopic = null;
-
-// Handle right-click on session items
-document.querySelectorAll('.session-item').forEach(item => {
-    item.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        
-        currentSessionId = item.dataset.sessionId;
-        currentSessionTopic = item.dataset.sessionTopic;
-        
-        contextMenu.style.left = e.clientX + 'px';
-        contextMenu.style.top = e.clientY + 'px';
-        contextMenu.classList.add('show');
-    });
-
-    // Also allow clicking the menu icon
-    item.querySelector('.session-menu-icon').addEventListener('click', (e) => {
-        e.stopPropagation();
-        
-        currentSessionId = item.dataset.sessionId;
-        currentSessionTopic = item.dataset.sessionTopic;
-        
-        const rect = item.getBoundingClientRect();
-        contextMenu.style.left = rect.right + 'px';
-        contextMenu.style.top = rect.top + 'px';
-        contextMenu.classList.add('show');
-    });
-});
-
-// Handle context menu click
-document.querySelector('.register-for-session').addEventListener('click', () => {
-    contextMenu.classList.remove('show');
-    
-    if (!currentSessionId) return;
-    
-    // Send registration request to server
-    fetch('common/session_registration.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: 'session_id=' + currentSessionId
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.status === 'success') {
-            // Redirect to login page with session ID
-            window.location.href = data.redirect_url;
-        } else {
-            alert('Error: ' + data.message);
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('An error occurred. Please try again.');
-    });
-});
-
-document.querySelector('.view-session-info').addEventListener('click', () => {
-    contextMenu.classList.remove('show');
-    alert('Session: ' + currentSessionTopic);
-});
-
-// Close context menu when clicking elsewhere
-document.addEventListener('click', () => {
-    contextMenu.classList.remove('show');
 });
 
 // Session data for dynamic dropdown population (populated from database)

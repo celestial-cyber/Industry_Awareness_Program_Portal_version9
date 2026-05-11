@@ -1,0 +1,21 @@
+year,module,question,option_a,option_b,option_c,option_d,correct_answer
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'Version Control'?,A way to control the speed of a program,A system that records changes to a file or set of files over time,Controlling the version of Windows,Buying new software,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'Repository' in GitHub?,A place where people sleep,A central location where data is stored and managed (a project folder),A type of code,A meeting,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'Commit'?,A promise to finish a project,A snapshot of changes made to the repository,An error in the code,Deleting a file,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'Open Source' software?,Software that is free to buy,"Software with source code that anyone can inspect, modify, and enhance",Software made by one company only,Software with no security,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'Fork' in GitHub?,A tool for eating,A personal copy of someone else's repository,A mistake in the code,A way to delete a project,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'Pull Request' (PR)?,A request to pull a door,A way to propose changes to a repository,A request for a promotion,Deleting a repository,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is the purpose of a 'README' file?,To say 'hi' to users,"To provide a description, instructions, and documentation for a project",To list the developer's name only,To hide the code,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'Gsoc'?,Google Summer of Code,Global Society of Coding,General Software Operation Center,Great Student of College,A
+3rd Year,GitHub Portfolio & Open Source Contribution,Why is contributing to Open Source good for your career?,You get paid directly by GitHub,"It shows your coding skills, collaboration ability, and real-world impact",It is required by law,It is the only way to get a job,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'Branch' in Git?,A part of a tree,A parallel version of a repository,An error,A type of computer,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'Markdown'?,A way to mark students' grades,A lightweight markup language for formatting text,A type of programming language like C++,A drawing tool,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'Git'?,A type of computer,A distributed version control system,A programming language,A social media site,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'Merge'?,Deleting two projects,Combining different versions of a project together,Splitting a project,Naming a project,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is an 'Issue' in GitHub?,A personal problem,"A way to track tasks, enhancements, and bugs for projects",A mistake in the developer's life,A type of certification,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'Hacktoberfest'?,A food festival,An annual event to encourage contribution to open source,A hacking competition,A movie marathon,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'License' in a GitHub repository?,A driving license,"A document stating how others can use, modify, and distribute the code",A birth certificate,A proof of payment,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'Cloning' a repository?,Making an exact copy of a remote repository to your local machine,Biologically copying the code,Deleting the repository,Moving a repository to another site,A
+3rd Year,GitHub Portfolio & Open Source Contribution,What is a 'Star' on GitHub?,A geometric shape,A way to bookmark a project and show appreciation,A rating out of 10,A type of badge,B
+3rd Year,GitHub Portfolio & Open Source Contribution,What is 'GitLab'?,A lab for biology,A web-based DevOps lifecycle tool that provides a Git-repository manager,A type of computer hardware,A coding school,B
+3rd Year,GitHub Portfolio & Open Source Contribution,Your GitHub profile serves as a:,Social media account for selfies,Technical portfolio for potential employers,Game center,Personal diary,B

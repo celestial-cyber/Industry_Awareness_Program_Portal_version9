@@ -36,6 +36,10 @@ $description_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'desc
 $session_description_exists = ($description_col_check && $description_col_check->num_rows > 0);
 $session_code_col_check = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'session_code'");
 $session_code_exists = ($session_code_col_check && $session_code_col_check->num_rows > 0);
+$approval_col_check = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'approval_status'");
+if ($approval_col_check && $approval_col_check->num_rows === 0) {
+    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN approval_status ENUM('pending','approved','rejected') DEFAULT 'pending' AFTER registration_status");
+}
 
 /**
  * Student year authorization for session registration.
@@ -117,9 +121,12 @@ try {
                 s.year,
                 {$description_select} as description,
                 ss.registration_status,
+                ss.approval_status,
+                qr.status as quiz_request_status,
                 ss.registered_at
             FROM iap_sessions s
             JOIN iap_student_sessions ss ON s.id = ss.session_id
+            LEFT JOIN quiz_requests qr ON qr.student_id = ss.student_id AND qr.session_id = ss.session_id
             WHERE ss.student_id = ?
             ORDER BY s.year ASC, s.{$session_title_column} ASC";
     
@@ -229,9 +236,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
                 if ($unique_check && $unique_check->num_rows === 0) {
                     $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
                 }
+                $approval_col_check = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'approval_status'");
+                if ($approval_col_check && $approval_col_check->num_rows === 0) {
+                    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN approval_status ENUM('pending','approved','rejected') DEFAULT 'pending' AFTER registration_status");
+                }
 
                 // Register for session if not duplicate.
-                $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id) VALUES (?, ?)";
+                $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, approval_status) VALUES (?, ?, 'pending')";
                 $register_stmt = $conn->prepare($register_sql);
                 $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
 
@@ -492,6 +503,7 @@ if (isset($_POST['reset_password'])) {
             line-height: 1.6;
             margin: 0;
             padding: 0;
+            overflow-x: hidden;
         }
 
         /* Sidebar */
@@ -506,6 +518,30 @@ if (isset($_POST['reset_password'])) {
             height: calc(100vh - 70px - 64px); /* Subtract header and footer height */
             overflow-y: auto;
             box-shadow: var(--shadow);
+            z-index: 1200;
+            transition: transform 0.28s ease;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            z-index: 1150;
+        }
+
+        .mobile-sidebar-toggle {
+            display: none;
+            border: 1px solid rgba(255, 255, 255, 0.45);
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin-right: 10px;
         }
 
         .sidebar-logo {
@@ -1043,15 +1079,47 @@ if (isset($_POST['reset_password'])) {
             margin-top: 0;
         }
 
+        @media (max-width: 991.98px) {
+            .mobile-sidebar-toggle {
+                display: inline-flex;
+            }
+
+            .dashboard-sidebar {
+                width: 260px !important;
+                height: calc(100vh - 70px) !important;
+                position: fixed !important;
+                top: 70px !important;
+                left: 0 !important;
+                padding: 16px !important;
+                border-right: 1px solid var(--border-color) !important;
+                border-bottom: none !important;
+                transform: translateX(-100%);
+                box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+            }
+
+            body.sidebar-open .dashboard-sidebar {
+                transform: translateX(0);
+            }
+
+            body.sidebar-open .sidebar-overlay {
+                display: block;
+            }
+
+            .main-dashboard-content {
+                margin-left: 0 !important;
+                width: 100% !important;
+            }
+
+            .dashboard-footer {
+                left: 0 !important;
+                width: 100% !important;
+            }
+        }
+
         @media (max-width: 768px) {
             .dashboard-sidebar {
-                width: 100% !important;
-                height: auto !important;
-                position: relative !important;
-                top: auto !important;
-                padding: 16px !important;
-                border-right: none !important;
-                border-bottom: 1px solid var(--border-color) !important;
+                top: 64px !important;
+                height: calc(100vh - 64px) !important;
             }
 
             .main-dashboard-content {
@@ -1089,6 +1157,9 @@ if (isset($_POST['reset_password'])) {
     <!-- Navigation Bar -->
     <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
         <div class="container-lg">
+            <button type="button" class="mobile-sidebar-toggle" id="mobileSidebarToggle" aria-label="Toggle sidebar" aria-controls="studentSidebar" aria-expanded="false">
+                <i class="fas fa-bars"></i>
+            </button>
             <a class="navbar-brand" href="index.php">
                 Industry Awareness Program Portal
             </a>
@@ -1116,8 +1187,10 @@ if (isset($_POST['reset_password'])) {
         </div>
     </nav>
 
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
     <!-- Sidebar -->
-    <div class="dashboard-sidebar">
+    <div class="dashboard-sidebar" id="studentSidebar">
         <div class="sidebar-logo">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <img src="../images/SA%20Main%20logo.jpg" alt="SA Main Logo" title="SA Main">
@@ -1134,6 +1207,9 @@ if (isset($_POST['reset_password'])) {
                 <i class="fas fa-home"></i> Dashboard
             </a>
 
+            <a href="english_quiz.php" class="sidebar-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'english_quiz') ? 'active' : ''; ?>">
+                <i class="fas fa-language"></i> English Quiz
+            </a>
             <a href="?view=view_all_sessions" class="sidebar-link <?php echo (isset($_GET['view']) && $_GET['view'] == 'view_all_sessions') ? 'active' : ''; ?>">
                 <i class="fas fa-list"></i> View All Sessions
             </a>
@@ -1346,6 +1422,9 @@ if (isset($_POST['reset_password'])) {
                                             </button>
 
                                             <?php if ($is_registered): ?>
+                                                <span style="align-self:center; font-size:11px; color:#6b7280;">
+                                                    Quiz Request: <?php echo htmlspecialchars(ucfirst((string)($session['quiz_request_status'] ?? 'not sent'))); ?>
+                                                </span>
                                                 <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="btn btn-primary btn-sm" style="flex: 1; padding: 8px; background: #7c3aed; color: white; border-radius: 6px; text-decoration: none; text-align: center;">
                                                     <i class="fas fa-play"></i> Take Quiz
                                                 </a>
@@ -2216,6 +2295,41 @@ if (isset($_POST['reset_password'])) {
 
     // Initialize password strength checker for reset password form
     document.addEventListener('DOMContentLoaded', function() {
+        const sidebarToggleBtn = document.getElementById('mobileSidebarToggle');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        const sidebar = document.getElementById('studentSidebar');
+        const mobileSidebarMq = window.matchMedia('(max-width: 991.98px)');
+
+        function closeSidebar() {
+            document.body.classList.remove('sidebar-open');
+            if (sidebarToggleBtn) {
+                sidebarToggleBtn.setAttribute('aria-expanded', 'false');
+            }
+        }
+
+        if (sidebarToggleBtn && sidebarOverlay && sidebar) {
+            sidebarToggleBtn.addEventListener('click', function() {
+                const isOpen = document.body.classList.toggle('sidebar-open');
+                sidebarToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+
+            sidebarOverlay.addEventListener('click', closeSidebar);
+
+            sidebar.querySelectorAll('a').forEach(function(link) {
+                link.addEventListener('click', function() {
+                    if (mobileSidebarMq.matches) {
+                        closeSidebar();
+                    }
+                });
+            });
+
+            window.addEventListener('resize', function() {
+                if (!mobileSidebarMq.matches) {
+                    closeSidebar();
+                }
+            });
+        }
+
         // Quick register from visible card buttons.
         const quickRegisterButtons = document.querySelectorAll('.quick-register-btn');
         quickRegisterButtons.forEach(function (btn) {
@@ -2374,6 +2488,3 @@ if (isset($_POST['reset_password'])) {
     </script>
 </body>
 </html>
-
-
-
