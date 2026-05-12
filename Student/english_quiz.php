@@ -4,78 +4,16 @@ require_once __DIR__ . '/../common/english_quiz_loader.php';
 
 $error_message = '';
 $success_message = '';
-$info_message = '';
 
 // Get available topics and statistics
 $available_topics = english_get_available_topics();
 $quiz_stats = english_get_quiz_statistics();
 
-// Check if english_quiz_requests table exists, create if not
-$table_check = $conn->query("SHOW TABLES LIKE 'english_quiz_requests'");
-if (!$table_check || $table_check->num_rows == 0) {
-    die("English quiz tables not found. Please run create_english_quiz_tables_final.php first.");
-}
-
-// Handle difficulty selection
+// Handle difficulty selection - directly redirect to quiz attempt
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['difficulty'])) {
     $difficulty = english_normalize_difficulty($_POST['difficulty']);
-
-    // Verify student has approved request for this difficulty
-    $approval_check = $conn->prepare("SELECT id FROM english_quiz_requests WHERE student_id = ? AND difficulty = ? AND status = 'approved' ORDER BY created_at DESC LIMIT 1");
-    if ($approval_check) {
-        $approval_check->bind_param("is", $_SESSION['student_id'], $difficulty);
-        $approval_check->execute();
-        $approved_request = $approval_check->get_result()->fetch_assoc();
-        $approval_check->close();
-        
-        if (!$approved_request) {
-            $error_message = "You don't have approval to take $difficulty quiz. Please request approval first.";
-        }
-    }
-
-    // Check if student already has a pending/approved request for this difficulty
-    $check_stmt = $conn->prepare("SELECT id, status FROM english_quiz_requests WHERE student_id = ? AND difficulty = ? ORDER BY created_at DESC LIMIT 1");
-    if ($check_stmt) {
-        $check_stmt->bind_param("is", $_SESSION['student_id'], $difficulty);
-        $check_stmt->execute();
-        $existing_request = $check_stmt->get_result()->fetch_assoc();
-        $check_stmt->close();
-        
-        if ($existing_request) {
-            if ($existing_request['status'] === 'pending') {
-                $info_message = "Your request for $difficulty quiz has been sent to admin for approval.";
-            } elseif ($existing_request['status'] === 'approved') {
-                // Redirect to quiz attempt page
-                header("Location: english_quiz_attempt.php?difficulty=$difficulty");
-                exit;
-            } elseif ($existing_request['status'] === 'rejected') {
-                $error_message = "Your request for $difficulty quiz was rejected by admin.";
-            }
-        } else {
-            // Create new request
-            $insert_stmt = $conn->prepare("INSERT INTO english_quiz_requests (student_id, difficulty, status, created_at) VALUES (?, ?, 'pending', NOW())");
-            if ($insert_stmt) {
-                $insert_stmt->bind_param("is", $_SESSION['student_id'], $difficulty);
-                if ($insert_stmt->execute()) {
-                    $info_message = "Your request for $difficulty quiz has been sent to admin for approval.";
-                } else {
-                    $error_message = "Failed to submit quiz request. Please try again.";
-                }
-                $insert_stmt->close();
-            }
-        }
-    }
-}
-
-// Get student's current requests
-$requests_stmt = $conn->prepare("SELECT difficulty, status, created_at FROM english_quiz_requests WHERE student_id = ? ORDER BY created_at DESC");
-if ($requests_stmt) {
-    $requests_stmt->bind_param("i", $_SESSION['student_id']);
-    $requests_stmt->execute();
-    $student_requests = $requests_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $requests_stmt->close();
-} else {
-    $student_requests = [];
+    header("Location: english_quiz_attempt.php?difficulty=$difficulty");
+    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -88,6 +26,111 @@ if ($requests_stmt) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="../common/theme.css">
     <style>
+        body {
+            background: #f8f9fa;
+        }
+        
+        .navbar-custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .dashboard-sidebar {
+            position: fixed;
+            left: 0;
+            top: 64px;
+            width: 250px;
+            height: calc(100vh - 64px);
+            background: white;
+            border-right: 1px solid #e5e7eb;
+            overflow-y: auto;
+            z-index: 999;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+
+        .dashboard-sidebar.show {
+            transform: translateX(0);
+        }
+
+        .sidebar-logo {
+            padding: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sidebar-logo img {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+        }
+
+        .sidebar-nav {
+            padding: 20px 0;
+        }
+
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: #6b7280;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar-link:hover {
+            background: #f3f4f6;
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+
+        .sidebar-link.active {
+            background: #f3f4f6;
+            color: #667eea;
+            border-left-color: #667eea;
+            font-weight: 600;
+        }
+
+        .main-dashboard-content {
+            margin-left: 250px;
+            margin-top: 64px;
+            padding: 30px 20px;
+            min-height: calc(100vh - 64px);
+        }
+
+        .mobile-sidebar-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            margin-right: 15px;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 998;
+        }
+
+        body.sidebar-open .dashboard-sidebar {
+            transform: translateX(0);
+        }
+
+        body.sidebar-open .sidebar-overlay {
+            display: block;
+        }
+
         .difficulty-card {
             transition: transform 0.3s ease, box-shadow 0.3s ease;
             border: none;
@@ -113,18 +156,6 @@ if ($requests_stmt) {
             background: #f8f9fa;
             border-left: 4px solid #007bff;
         }
-        .request-status-pending {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-        }
-        .request-status-approved {
-            background-color: #d1e7dd;
-            border: 1px solid #bee5eb;
-        }
-        .request-status-rejected {
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-        }
         .topic-badge {
             background: #e9ecef;
             color: #495057;
@@ -132,53 +163,103 @@ if ($requests_stmt) {
             border-radius: 12px;
             font-size: 0.75rem;
         }
+
+        @media (max-width: 768px) {
+            .mobile-sidebar-toggle {
+                display: block;
+            }
+
+            .main-dashboard-content {
+                margin-left: 0;
+                padding: 20px 15px;
+            }
+
+            .dashboard-sidebar {
+                width: 100%;
+                max-width: 250px;
+            }
+        }
     </style>
 </head>
-<body style="background: #f8f9fa;">
-    <nav class="navbar navbar-dark" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
         <div class="container-lg">
-            <span class="navbar-brand"><i class="fas fa-language"></i> English Module Quiz</span>
-            <a href="student_dashboard.php" class="btn btn-outline-light btn-sm"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            <button type="button" class="mobile-sidebar-toggle" id="mobileSidebarToggle" aria-label="Toggle sidebar">
+                <i class="fas fa-bars"></i>
+            </button>
+            <a class="navbar-brand" href="student_dashboard.php">
+                <i class="fas fa-language"></i> English Quiz
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <div class="user-info" style="display: flex; align-items: center; gap: 10px; color: white;">
+                            <i class="fas fa-user-circle"></i> 
+                            <div>
+                                <div style="font-weight: 600;"><?php echo htmlspecialchars($_SESSION['full_name']); ?></div>
+                                <small><?php echo htmlspecialchars($_SESSION['email']); ?></small>
+                            </div>
+                        </div>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="student_dashboard.php">
+                            <i class="fas fa-arrow-left"></i> Back to Dashboard
+                        </a>
+                    </li>
+                </ul>
+            </div>
         </div>
     </nav>
 
-    <div class="container-lg py-4">
-        <!-- Messages -->
-        <?php if (!empty($error_message)): ?>
-            <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                <?php echo htmlspecialchars($error_message); ?>
-            </div>
-        <?php endif; ?>
-        
-        <?php if (!empty($info_message)): ?>
-            <div class="alert alert-info alert-dismissible fade show" role="alert">
-                <?php echo htmlspecialchars($info_message); ?>
-            </div>
-        <?php endif; ?>
-        
-        <?php if (!empty($success_message)): ?>
-            <div class="alert alert-success alert-dismissible fade show" role="alert">
-                <?php echo htmlspecialchars($success_message); ?>
-            </div>
-        <?php endif; ?>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-        <!-- Header -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-body">
-                        <h2 class="card-title text-center mb-0">
-                            <i class="fas fa-graduation-cap text-primary"></i>
-                            English Module Quiz System
-                        </h2>
-                        <p class="text-center text-muted mt-2 mb-0">
-                            Choose your difficulty level and test your English skills
-                        </p>
-                    </div>
+    <!-- Sidebar -->
+    <div class="dashboard-sidebar" id="studentSidebar">
+        <div class="sidebar-logo">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <img src="../images/SA%20Main%20logo.jpg" alt="SA Main Logo" title="SA Main">
+                <div style="display: flex; flex-direction: column;">
+                    <span style="font-size: 14px; font-weight: 700; color: #7c3aed; line-height: 1.2;">SPECANCIENS</span>
+                    <span style="font-size: 12px; font-weight: 700; color: #6b7280; line-height: 1.2;">IAP Portal</span>
                 </div>
             </div>
         </div>
 
+        <!-- Navigation Menu -->
+        <div class="sidebar-nav">
+            <a href="student_dashboard.php" class="sidebar-link">
+                <i class="fas fa-home"></i> Dashboard
+            </a>
+            <a href="english_quiz.php" class="sidebar-link active">
+                <i class="fas fa-language"></i> English Quiz
+            </a>
+            <a href="student_dashboard.php?view=view_all_sessions" class="sidebar-link">
+                <i class="fas fa-list"></i> View All Sessions
+            </a>
+            <a href="student_dashboard.php?view=view_registered_sessions" class="sidebar-link">
+                <i class="fas fa-check-circle"></i> View Registered Sessions
+            </a>
+            <a href="student_dashboard.php?view=view_progress" class="sidebar-link">
+                <i class="fas fa-chart-line"></i> View Progress
+            </a>
+            <a href="student_dashboard.php?view=edit_profile" class="sidebar-link">
+                <i class="fas fa-user-edit"></i> Edit Profile
+            </a>
+            <a href="pronunciation.php" class="sidebar-link">
+                <i class="fas fa-microphone-alt"></i> Phonetics Practice
+            </a>
+            <a href="student_dashboard.php?view=reset_password" class="sidebar-link">
+                <i class="fas fa-key"></i> Reset Password
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-dashboard-content">
         <!-- Difficulty Selection -->
         <div class="row mb-4">
             <div class="col-12">
@@ -275,71 +356,6 @@ if ($requests_stmt) {
             </div>
         </div>
 
-        <!-- Your Quiz Requests -->
-        <?php if (!empty($student_requests)): ?>
-            <div class="row">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header">
-                            <h5 class="mb-0"><i class="fas fa-history"></i> Your Quiz Requests</h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>Difficulty</th>
-                                            <th>Status</th>
-                                            <th>Requested Date</th>
-                                            <th>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($student_requests as $request): ?>
-                                            <tr>
-                                                <td>
-                                                    <span class="badge bg-<?php echo $request['difficulty'] === 'easy' ? 'success' : ($request['difficulty'] === 'medium' ? 'warning' : 'danger'); ?>">
-                                                        <?php echo ucfirst($request['difficulty']); ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <?php
-                                                    $statusClass = 'request-status-' . $request['status'];
-                                                    $statusIcon = $request['status'] === 'pending' ? 'clock' : ($request['status'] === 'approved' ? 'check' : 'times');
-                                                    $statusText = ucfirst($request['status']);
-                                                    ?>
-                                                    <span class="badge <?php echo $statusClass; ?>">
-                                                        <i class="fas fa-<?php echo $statusIcon; ?>"></i>
-                                                        <?php echo $statusText; ?>
-                                                    </span>
-                                                </td>
-                                                <td><?php echo date('M j, Y H:i', strtotime($request['created_at'])); ?></td>
-                                                <td>
-                                                    <?php if ($request['status'] === 'approved'): ?>
-                                                        <a href="english_quiz_attempt.php?difficulty=<?php echo urlencode($request['difficulty']); ?>" class="btn btn-sm btn-success">
-                                                            <i class="fas fa-play"></i> Take Quiz
-                                                        </a>
-                                                    <?php elseif ($request['status'] === 'pending'): ?>
-                                                        <button class="btn btn-sm btn-warning" disabled>
-                                                            <i class="fas fa-clock"></i> Pending
-                                                        </button>
-                                                    <?php else: ?>
-                                                        <button class="btn btn-sm btn-danger" disabled>
-                                                            <i class="fas fa-times"></i> Rejected
-                                                        </button>
-                                                    <?php endif; ?>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        <?php endif; ?>
-
         <!-- Available Topics -->
         <div class="row">
             <div class="col-12">
@@ -363,5 +379,25 @@ if ($requests_stmt) {
             </div>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Mobile sidebar toggle
+        const mobileSidebarToggle = document.getElementById('mobileSidebarToggle');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        const studentSidebar = document.getElementById('studentSidebar');
+
+        if (mobileSidebarToggle) {
+            mobileSidebarToggle.addEventListener('click', function() {
+                document.body.classList.toggle('sidebar-open');
+            });
+        }
+
+        if (sidebarOverlay) {
+            sidebarOverlay.addEventListener('click', function() {
+                document.body.classList.remove('sidebar-open');
+            });
+        }
+    </script>
 </body>
 </html>

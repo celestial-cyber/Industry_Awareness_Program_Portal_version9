@@ -217,7 +217,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <div class="container hero-content">
             <div class="hero-text">
                 <h2>Admin Login</h2>
-                <p>Access the admin dashboard to manage sessions and view registrations.</p>
+                
                 <div class="login-form">
                     <h3>Login</h3>
                     <?php if ($message): ?>

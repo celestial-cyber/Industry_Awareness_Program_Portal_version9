@@ -1,6 +1,7 @@
 <?php
 require_once 'student_session_check.php';
 require_once __DIR__ . '/../common/quiz_data_loader.php';
+require_once 'quiz_helpers.php';
 
 $error_message = '';
 $success_message = '';
@@ -9,11 +10,24 @@ $session_data = null;
 $quiz_questions = [];
 $is_authorized = false;
 $latest_attempt = null;
+$quiz_already_completed = false;
 
 $session_id = isset($_GET['session_id']) ? intval($_GET['session_id']) : 0;
 if ($session_id <= 0) {
     $error_message = "Invalid session ID";
 }
+
+$session_title_column = 'topic';
+$title_col_check_quiz = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'title'");
+if ($title_col_check_quiz && $title_col_check_quiz->num_rows > 0) {
+    $session_title_column = 'title';
+}
+$session_description_exists_quiz = false;
+$desc_col_check_quiz = $conn->query("SHOW COLUMNS FROM iap_sessions LIKE 'description'");
+if ($desc_col_check_quiz && $desc_col_check_quiz->num_rows > 0) {
+    $session_description_exists_quiz = true;
+}
+$quiz_sessions_description_select = $session_description_exists_quiz ? 's.description' : "''";
 
 if (empty($error_message)) {
     $conn->query("CREATE TABLE IF NOT EXISTS quiz_questions (
@@ -95,7 +109,7 @@ if (empty($error_message)) {
         CONSTRAINT fk_quiz_result_session FOREIGN KEY (session_id) REFERENCES iap_sessions(id) ON DELETE CASCADE
     )");
 
-    $validation_sql = "SELECT s.id AS session_id, s.title, s.year, s.description, ss.registration_status
+    $validation_sql = "SELECT s.id AS session_id, s.{$session_title_column} AS title, s.year, {$quiz_sessions_description_select} AS description, ss.registration_status
                        FROM iap_student_sessions ss
                        JOIN iap_sessions s ON ss.session_id = s.id
                        WHERE ss.student_id = ? AND ss.session_id = ?";
@@ -114,29 +128,16 @@ if (empty($error_message)) {
         } elseif (!in_array($session_data['registration_status'], ['registered', 'completed'], true)) {
             $error_message = "You cannot take this quiz. Registration status: " . htmlspecialchars($session_data['registration_status']);
         } else {
-            $request_stmt = $conn->prepare("SELECT id, status FROM quiz_requests WHERE student_id = ? AND session_id = ? LIMIT 1");
-            $request_row = null;
-            if ($request_stmt) {
-                $request_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
-                $request_stmt->execute();
-                $request_result = $request_stmt->get_result();
-                $request_row = $request_result ? $request_result->fetch_assoc() : null;
-                $request_stmt->close();
-            }
-
-            if (!$request_row) {
-                $create_stmt = $conn->prepare("INSERT INTO quiz_requests (student_id, session_id, status) VALUES (?, ?, 'pending')");
-                if ($create_stmt) {
-                    $create_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
-                    $create_stmt->execute();
-                    $create_stmt->close();
-                }
-                $info_message = "Quiz request sent to admin for approval.";
-            } elseif ($request_row['status'] === 'pending') {
-                $info_message = "Quiz request sent to admin for approval.";
-            } elseif ($request_row['status'] === 'rejected') {
-                $error_message = "Your quiz request was rejected by admin.";
+            // Check if student has already completed this quiz (retake prevention)
+            $quiz_already_completed = has_student_completed_quiz($conn, $_SESSION['student_id'], $session_id);
+            
+            if ($quiz_already_completed) {
+                $latest_attempt = get_latest_quiz_attempt($conn, $_SESSION['student_id'], $session_id);
+                $error_message = "You have already completed this quiz. Your score: " . 
+                                htmlspecialchars($latest_attempt['score'] . '/' . $latest_attempt['total_questions']) . 
+                                " (" . htmlspecialchars($latest_attempt['percentage']) . "%)";
             } else {
+                // Student is authorized to take the quiz (no approval needed)
                 $is_authorized = true;
             }
         }
@@ -144,40 +145,10 @@ if (empty($error_message)) {
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" && $is_authorized) {
-    // Check if we're dealing with CSV-loaded questions
-    $is_csv_quiz = false;
-    foreach ($quiz_questions as $q) {
-        if (isset($q['id']) && strpos($q['id'], 'csv_') === 0) {
-            $is_csv_quiz = true;
-            break;
-        }
-    }
-    
-    if ($is_csv_quiz) {
-        // Handle CSV quiz submission
-        $csv_questions = quiz_load_questions_direct_from_csv($session_data['year'], $session_data['title']);
-        $total = count($csv_questions);
-        $correct = 0;
-        
-        foreach ($csv_questions as $index => $q) {
-            $selected = strtoupper(trim((string)($_POST['answers']['csv_' . $index] ?? '')));
-            $correct_answer = strtoupper($q['correct_answer']);
-            
-            if ($selected === $correct_answer) {
-                $correct++;
-            }
-        }
-        
-        $score = $correct;
-        $percentage = round(($correct / $total) * 100, 2);
-        $success_message = "Quiz submitted successfully. Score: {$score}/{$total} ({$percentage}%).";
-        
-        // Note: CSV quiz results are not saved to database since they're temporary
-        $success_message .= " Note: Results for CSV-loaded quizzes are not permanently saved.";
-        
+    $questions_stmt = $conn->prepare("SELECT id, correct_answer FROM quiz_questions WHERE session_id = ? AND is_active = 1 ORDER BY id ASC");
+    if (!$questions_stmt) {
+        $error_message = "Database error: " . $conn->error;
     } else {
-        // Handle database quiz submission (existing logic)
-        $questions_stmt = $conn->prepare("SELECT id, correct_answer FROM quiz_questions WHERE session_id = ? AND is_active = 1 ORDER BY id ASC");
         $questions_stmt->bind_param("i", $session_id);
         $questions_stmt->execute();
         $questions_result = $questions_stmt->get_result();
@@ -191,7 +162,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $is_authorized) {
         $questions_stmt->close();
 
         if (empty($keys)) {
-            $error_message = "No quiz questions are configured for this module yet.";
+            $error_message = "No quiz questions are available for this module. If a quiz file exists, ask your coordinator to refresh or check the module name matches the CSV.";
         } else {
             $answers = $_POST['answers'] ?? [];
             $total = count($keys);
@@ -199,21 +170,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $is_authorized) {
 
             $conn->begin_transaction();
             try {
-                $request_id = null;
-                $request_stmt = $conn->prepare("SELECT id FROM quiz_requests WHERE student_id = ? AND session_id = ? LIMIT 1");
-                if ($request_stmt) {
-                    $request_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
-                    $request_stmt->execute();
-                    $request_result = $request_stmt->get_result();
-                    $request_row = $request_result ? $request_result->fetch_assoc() : null;
-                    $request_stmt->close();
-                    if ($request_row) {
-                        $request_id = (int)$request_row['id'];
-                    }
-                }
-
-                $attempt_stmt = $conn->prepare("INSERT INTO quiz_attempts (student_id, session_id, request_id) VALUES (?, ?, ?)");
-                $attempt_stmt->bind_param("iii", $_SESSION['student_id'], $session_id, $request_id);
+                // Create quiz attempt (no request_id needed - approval workflow removed)
+                $attempt_stmt = $conn->prepare("INSERT INTO quiz_attempts (student_id, session_id, request_id) VALUES (?, ?, NULL)");
+                $attempt_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
                 $attempt_stmt->execute();
                 $attempt_id = (int)$conn->insert_id;
                 $attempt_stmt->close();
@@ -232,7 +191,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $is_authorized) {
                 $answer_stmt->close();
 
                 $score = $correct;
-                $percentage = round(($correct / $total) * 100, 2);
+                $percentage = $total > 0 ? round(($correct / $total) * 100, 2) : 0.0;
                 $result_stmt = $conn->prepare("INSERT INTO quiz_results (attempt_id, student_id, session_id, total_questions, correct_answers, score, percentage) VALUES (?, ?, ?, ?, ?, ?, ?)");
                 $result_stmt->bind_param("iiiiiid", $attempt_id, $_SESSION['student_id'], $session_id, $total, $correct, $score, $percentage);
                 $result_stmt->execute();
@@ -242,6 +201,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $is_authorized) {
                 $success_message = "Quiz submitted successfully. Score: {$score}/{$total} ({$percentage}%).";
             } catch (Exception $e) {
                 $conn->rollback();
+                error_log('Quiz submit error: ' . $e->getMessage());
                 $error_message = "Unable to submit quiz. Please try again.";
             }
         }
@@ -249,27 +209,24 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $is_authorized) {
 }
 
 if ($is_authorized && empty($error_message)) {
-    // Try to load questions from CSV first if none exist in database
+    $csv_folder_year = (string)(isset($_SESSION['year']) && $_SESSION['year'] !== '' ? $_SESSION['year'] : ($session_data['year'] ?? ''));
+    error_log('Quiz page: student_session_year=' . (string)($_SESSION['year'] ?? '') . ' session_catalog_year=' . (string)($session_data['year'] ?? '') . ' csv_folder_year=' . $csv_folder_year . ' module_title=' . (string)($session_data['title'] ?? ''));
+
+    $resolved = quiz_resolve_module_csv($csv_folder_year, (string)$session_data['title']);
+
     $load_stmt = $conn->prepare("SELECT COUNT(*) as count FROM quiz_questions WHERE session_id = ? AND is_active = 1");
     $load_stmt->bind_param("i", $session_id);
     $load_stmt->execute();
     $load_result = $load_stmt->get_result();
-    $question_count = $load_result ? $load_result->fetch_assoc()['count'] : 0;
+    $question_count = (int)($load_result ? $load_result->fetch_assoc()['count'] : 0);
     $load_stmt->close();
-    
-    if ($question_count == 0 && !empty($session_data)) {
-        // No questions in database, try to load from CSV
-        error_log("Quiz: No questions found for session_id $session_id, attempting CSV load");
-        $inserted = quiz_load_questions_for_session($conn, $session_id, $session_data['year'], $session_data['title']);
-        
-        if ($inserted > 0) {
-            error_log("Quiz: Successfully loaded $inserted questions from CSV for session '$session_data[title]'");
-        } else {
-            error_log("Quiz: Failed to load questions from CSV for session '$session_data[title]'");
-        }
+
+    if ($question_count === 0 && !empty($session_data)) {
+        error_log("Quiz: syncing questions from CSV for session_id={$session_id} title='" . $session_data['title'] . "'");
+        $inserted = quiz_load_questions_for_session($conn, $session_id, (string)$session_data['year'], (string)$session_data['title'], null, $csv_folder_year);
+        error_log("Quiz: CSV sync inserted {$inserted} row(s) (csv_folder_year={$csv_folder_year})");
     }
-    
-    // Load questions from database
+
     $load_stmt = $conn->prepare("SELECT id, question, option_a, option_b, option_c, option_d FROM quiz_questions WHERE session_id = ? AND is_active = 1 ORDER BY id ASC");
     $load_stmt->bind_param("i", $session_id);
     $load_stmt->execute();
@@ -278,35 +235,15 @@ if ($is_authorized && empty($error_message)) {
         $quiz_questions[] = $row;
     }
     $load_stmt->close();
-    
-    // Fallback: if still no questions, try direct CSV loading
-    if (empty($quiz_questions) && !empty($session_data)) {
-        error_log("Quiz: Database fallback failed, trying direct CSV loading for session '$session_data[title]'");
-        $csv_questions = quiz_load_questions_direct_from_csv($session_data['year'], $session_data['title']);
-        
-        if (!empty($csv_questions)) {
-            // Convert CSV questions to database format for display
-            foreach ($csv_questions as $index => $q) {
-                $quiz_questions[] = [
-                    'id' => 'csv_' . $index, // Temporary ID for CSV questions
-                    'question' => $q['question'],
-                    'option_a' => $q['option_a'],
-                    'option_b' => $q['option_b'],
-                    'option_c' => $q['option_c'],
-                    'option_d' => $q['option_d']
-                ];
-            }
-            error_log("Quiz: Loaded " . count($csv_questions) . " questions directly from CSV for session '$session_data[title]'");
-        } else {
-            error_log("Quiz: No questions found in CSV for session '$session_data[title]'");
-            
-            // Debug: List available modules for this year
-            $available_modules = quiz_debug_list_modules();
-            if (isset($available_modules[$session_data['year']])) {
-                error_log("Quiz: Available modules for year {$session_data['year']}: " . implode(', ', $available_modules[$session_data['year']]));
-            } else {
-                error_log("Quiz: No modules found for year {$session_data['year']}");
-            }
+
+    if (empty($quiz_questions)) {
+        $preview = quiz_read_question_rows_from_resolved($resolved, $csv_folder_year, (string)$session_data['title']);
+        if ($resolved === null) {
+            error_log('Quiz UI: no CSV resolved for csv_folder_year=' . $csv_folder_year . ' title=' . $session_data['title']);
+            $error_message = 'No quiz CSV could be located for your module and academic year folder (quiz_data/Year1–Year4). This message appears only when the file is missing or unreadable.';
+        } elseif ($preview === []) {
+            error_log('Quiz UI: CSV resolved to ' . ($resolved['path'] ?? '') . ' but zero valid rows for csv_folder_year/module slug.');
+            $error_message = 'A quiz file was found, but it has no valid questions for your year, or every row failed validation. Check the CSV format (year,module,question,options,correct_answer).';
         }
     }
 
@@ -364,10 +301,11 @@ if ($is_authorized && empty($error_message)) {
                             <div class="mb-4 pb-3 border-bottom">
                                 <div class="text-primary fw-bold small">Question <?php echo $idx + 1; ?></div>
                                 <div class="fw-semibold mb-2"><?php echo htmlspecialchars($q['question']); ?></div>
-                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars($q['id']); ?>]" value="A" required><label class="form-check-label">A. <?php echo htmlspecialchars($q['option_a']); ?></label></div>
-                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars($q['id']); ?>]" value="B" required><label class="form-check-label">B. <?php echo htmlspecialchars($q['option_b']); ?></label></div>
-                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars($q['id']); ?>]" value="C" required><label class="form-check-label">C. <?php echo htmlspecialchars($q['option_c']); ?></label></div>
-                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars($q['id']); ?>]" value="D" required><label class="form-check-label">D. <?php echo htmlspecialchars($q['option_d']); ?></label></div>
+                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars((string)$q['id']); ?>]" value="A"><label class="form-check-label">A. <?php echo htmlspecialchars($q['option_a']); ?></label></div>
+                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars((string)$q['id']); ?>]" value="B"><label class="form-check-label">B. <?php echo htmlspecialchars($q['option_b']); ?></label></div>
+                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars((string)$q['id']); ?>]" value="C"><label class="form-check-label">C. <?php echo htmlspecialchars($q['option_c']); ?></label></div>
+                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars((string)$q['id']); ?>]" value="D"><label class="form-check-label">D. <?php echo htmlspecialchars($q['option_d']); ?></label></div>
+                                <div class="form-check"><input class="form-check-input" type="radio" name="answers[<?php echo htmlspecialchars((string)$q['id']); ?>]" value="" checked><label class="form-check-label text-muted">Skip (unanswered)</label></div>
                             </div>
                         <?php endforeach; ?>
                         <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Submit Quiz</button>
@@ -375,10 +313,10 @@ if ($is_authorized && empty($error_message)) {
                 </form>
             <?php else: ?>
                 <div class="alert alert-warning">
-                    Quiz questions are not available for this module yet.
+                    <?php echo !empty($error_message) ? htmlspecialchars($error_message) : 'Quiz questions are not available for this module yet.'; ?>
                     <?php if (!empty($session_data)): ?>
                         <br><small class="text-muted">
-                            Debug info: Module "<?php echo htmlspecialchars($session_data['title']); ?>" (Year: <?php echo htmlspecialchars($session_data['year']); ?>)
+                            Module: <?php echo htmlspecialchars((string)$session_data['title']); ?> · Catalog year: <?php echo htmlspecialchars((string)$session_data['year']); ?>
                         </small>
                     <?php endif; ?>
                 </div>

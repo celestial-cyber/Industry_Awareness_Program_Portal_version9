@@ -419,7 +419,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <div class="container hero-content">
             <div class="hero-text">
                 <h2>Student Login</h2>
-                <p>Access your personalized student dashboard to view registered sessions, take quizzes, and track your progress in the IAP program.</p>
+              
                 <div class="login-form">
                     <h3><i class="fas fa-sign-in-alt"></i> Login</h3>
                     

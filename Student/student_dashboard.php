@@ -9,6 +9,8 @@
 // Include session protection - must be at the top
 require_once 'student_session_check.php';
 require_once 'validation_helpers.php';
+require_once __DIR__ . '/../common/quiz_data_loader.php';
+require_once 'quiz_helpers.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -121,12 +123,9 @@ try {
                 s.year,
                 {$description_select} as description,
                 ss.registration_status,
-                ss.approval_status,
-                qr.status as quiz_request_status,
                 ss.registered_at
             FROM iap_sessions s
             JOIN iap_student_sessions ss ON s.id = ss.session_id
-            LEFT JOIN quiz_requests qr ON qr.student_id = ss.student_id AND qr.session_id = ss.session_id
             WHERE ss.student_id = ?
             ORDER BY s.year ASC, s.{$session_title_column} ASC";
     
@@ -220,38 +219,52 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_session'])) {
         if ($session_id > 0) {
             $session_sql = "SELECT id, {$session_title_column} AS session_title, year FROM iap_sessions WHERE id = ?";
             $session_stmt = $conn->prepare($session_sql);
-            $session_stmt->bind_param("i", $session_id);
-            $session_stmt->execute();
-            $session_result = $session_stmt->get_result();
-            $session_row = $session_result->fetch_assoc();
-            $session_stmt->close();
-
-            if (!$session_row) {
-                $error_message = "Session not found.";
-            } elseif (!can_register_for_session_year($student_year, (string)$session_row['year'])) {
-                $error_message = "You can only register for sessions of your academic year";
+            if (!$session_stmt) {
+                $error_message = "Database error: " . $conn->error;
             } else {
-                // Ensure duplicate prevention index exists.
-                $unique_check = $conn->query("SHOW INDEX FROM iap_student_sessions WHERE Key_name = 'unique_student_session'");
-                if ($unique_check && $unique_check->num_rows === 0) {
-                    $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
-                }
-                $approval_col_check = $conn->query("SHOW COLUMNS FROM iap_student_sessions LIKE 'approval_status'");
-                if ($approval_col_check && $approval_col_check->num_rows === 0) {
-                    $conn->query("ALTER TABLE iap_student_sessions ADD COLUMN approval_status ENUM('pending','approved','rejected') DEFAULT 'pending' AFTER registration_status");
-                }
+                $session_stmt->bind_param("i", $session_id);
+                $session_stmt->execute();
+                $session_result = $session_stmt->get_result();
+                $session_row = $session_result->fetch_assoc();
+                $session_stmt->close();
 
-                // Register for session if not duplicate.
-                $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, approval_status) VALUES (?, ?, 'pending')";
-                $register_stmt = $conn->prepare($register_sql);
-                $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
+                if (!$session_row) {
+                    $error_message = "Session not found in database. Please try again.";
+                } elseif (!can_register_for_session_year($student_year, (string)$session_row['year'])) {
+                    $error_message = "You can only register for sessions of your academic year";
+                } else {
+                    // Ensure duplicate prevention index exists.
+                    $unique_check = $conn->query("SHOW INDEX FROM iap_student_sessions WHERE Key_name = 'unique_student_session'");
+                    if ($unique_check && $unique_check->num_rows === 0) {
+                        $conn->query("ALTER TABLE iap_student_sessions ADD UNIQUE KEY unique_student_session (student_id, session_id)");
+                    }
 
-                if ($register_stmt->execute()) {
-                    header("Location: ?view=view_all_sessions&success=1");
-                    exit();
+                    // Register for session if not duplicate.
+                    // Use 'registered' status directly (no approval workflow)
+                    $register_sql = "INSERT INTO iap_student_sessions (student_id, session_id, registration_status) VALUES (?, ?, 'registered')";
+                    $register_stmt = $conn->prepare($register_sql);
+                    if (!$register_stmt) {
+                        $error_message = "Database error: " . $conn->error;
+                    } else {
+                        $register_stmt->bind_param("ii", $_SESSION['student_id'], $session_id);
+
+                        if ($register_stmt->execute()) {
+                            header("Location: ?view=view_all_sessions&success=1");
+                            exit();
+                        } else {
+                            // Check if it's a duplicate or foreign key error
+                            $error_msg = $register_stmt->error;
+                            if (strpos($error_msg, 'Duplicate') !== false) {
+                                $error_message = "Already registered for this session.";
+                            } elseif (strpos($error_msg, 'foreign key') !== false) {
+                                $error_message = "Session validation failed. Please try again.";
+                            } else {
+                                $error_message = "Unable to register for this session. " . $error_msg;
+                            }
+                        }
+                        $register_stmt->close();
+                    }
                 }
-                $error_message = "Already registered for this session or unable to register.";
-                $register_stmt->close();
             }
         }
     }
@@ -1312,7 +1325,7 @@ if (isset($_POST['reset_password'])) {
                 <!-- Welcome Header -->
                 <div class="welcome-header">
                     <h1><i class="fas fa-chart-line"></i> Welcome, <?php echo htmlspecialchars(explode(' ', $_SESSION['full_name'])[0]); ?>!</h1>
-                    <p>Here are the IAP sessions you have registered for. Click "Take Quiz" to participate in a session's quiz.</p>
+                    
 
                     <div class="student-info-grid">
                         <div class="info-badge">
@@ -1422,12 +1435,21 @@ if (isset($_POST['reset_password'])) {
                                             </button>
 
                                             <?php if ($is_registered): ?>
-                                                <span style="align-self:center; font-size:11px; color:#6b7280;">
-                                                    Quiz Request: <?php echo htmlspecialchars(ucfirst((string)($session['quiz_request_status'] ?? 'not sent'))); ?>
-                                                </span>
-                                                <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="btn btn-primary btn-sm" style="flex: 1; padding: 8px; background: #7c3aed; color: white; border-radius: 6px; text-decoration: none; text-align: center;">
-                                                    <i class="fas fa-play"></i> Take Quiz
-                                                </a>
+                                                <?php 
+                                                $quiz_status = get_quiz_button_status($conn, $_SESSION['student_id'], $session['id']);
+                                                $button_disabled = $quiz_status['disabled'] ? 'disabled' : '';
+                                                $button_style = $quiz_status['disabled'] ? 'background: #9ca3af; cursor: not-allowed;' : 'background: #7c3aed;';
+                                                ?>
+                                                <?php if ($quiz_status['disabled']): ?>
+                                                    <div style="flex: 1; padding: 8px; background: #d1d5db; color: white; border-radius: 6px; text-align: center; font-size: 12px;">
+                                                        <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                        <br><small><?php echo htmlspecialchars($quiz_status['score']); ?> (<?php echo htmlspecialchars($quiz_status['percentage']); ?>)</small>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="btn btn-primary btn-sm" style="flex: 1; padding: 8px; background: #7c3aed; color: white; border-radius: 6px; text-decoration: none; text-align: center;">
+                                                        <i class="fas fa-play"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                    </a>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <button onclick="registerForSession(<?php echo $session['id']; ?>, '<?php echo htmlspecialchars($session['title']); ?>', '<?php echo htmlspecialchars((string)$session['year'], ENT_QUOTES); ?>')" class="btn btn-success btn-sm" style="flex: 1; padding: 8px; background: #10b981; color: white; border-radius: 6px; border: none; cursor: pointer;">
                                                     <i class="fas fa-plus"></i> Register
@@ -1517,9 +1539,18 @@ if (isset($_POST['reset_password'])) {
                                         </div>
 
                                         <div class="progress-actions" style="display: flex; gap: 10px;">
-                                            <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="btn btn-primary btn-sm" style="flex: 1; padding: 8px; background: #7c3aed; color: white; border-radius: 6px; text-decoration: none; text-align: center;">
-                                                <i class="fas fa-play"></i> Take Quiz
-                                            </a>
+                                            <?php 
+                                            $quiz_status = get_quiz_button_status($conn, $_SESSION['student_id'], $session['id']);
+                                            if ($quiz_status['disabled']): ?>
+                                                <div style="flex: 1; padding: 8px; background: #d1d5db; color: white; border-radius: 6px; text-align: center; font-size: 12px;">
+                                                    <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                    <br><small><?php echo htmlspecialchars($quiz_status['score']); ?> (<?php echo htmlspecialchars($quiz_status['percentage']); ?>)</small>
+                                                </div>
+                                            <?php else: ?>
+                                                <a href="quiz.php?session_id=<?php echo $session['id']; ?>" class="btn btn-primary btn-sm" style="flex: 1; padding: 8px; background: #7c3aed; color: white; border-radius: 6px; text-decoration: none; text-align: center;">
+                                                    <i class="fas fa-play"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                </a>
+                                            <?php endif; ?>
                                             <button onclick="viewSessionDetail(<?php echo $session['id']; ?>, '<?php echo htmlspecialchars($session['title']); ?>')" class="btn btn-outline-secondary btn-sm" style="flex: 1; padding: 8px; border: 1px solid #6b7280; color: #6b7280; border-radius: 6px; background: transparent; cursor: pointer;">
                                                 <i class="fas fa-info-circle"></i> Details
                                             </button>
@@ -1906,9 +1937,17 @@ if (isset($_POST['reset_password'])) {
                                             </td>
                                             <td style="padding: 12px 16px;">
                                                 <?php if ($is_registered): ?>
-                                                    <a href="quiz.php?session_id=<?php echo (int)$session['id']; ?>" class="btn btn-sm" style="background:#7c3aed; color:white; border:none; border-radius:6px; padding:8px 12px;">
-                                                        <i class="fas fa-play"></i> Take Quiz
-                                                    </a>
+                                                    <?php 
+                                                    $quiz_status = get_quiz_button_status($conn, $_SESSION['student_id'], $session['id']);
+                                                    if ($quiz_status['disabled']): ?>
+                                                        <span style="background: #d1d5db; color: white; padding: 8px 12px; border-radius: 6px; display: inline-block; font-size: 12px;">
+                                                            <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                        </span>
+                                                    <?php else: ?>
+                                                        <a href="quiz.php?session_id=<?php echo (int)$session['id']; ?>" class="btn btn-sm" style="background:#7c3aed; color:white; border:none; border-radius:6px; padding:8px 12px;">
+                                                            <i class="fas fa-play"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                        </a>
+                                                    <?php endif; ?>
                                                 <?php elseif ((int)$session['id'] > 0): ?>
                                                     <form method="POST" action="?view=view_all_sessions" style="margin:0;">
                                                         <input type="hidden" name="session_id" value="<?php echo (int)$session['id']; ?>">
@@ -1951,7 +1990,9 @@ if (isset($_POST['reset_password'])) {
                 ?>
                 <div class="welcome-header">
                     <h1><i class="fas fa-check-circle"></i> Your Registered Sessions</h1>
-                    <p>Here are all the sessions you have registered for. Click "Take Quiz" to participate.</p>
+                    <p>Here are all the sessions you have registered for. Use <strong>Take Quiz</strong> to start.</p>
+
+                    
 
                     <div class="student-info-grid">
                         <div class="info-badge">
@@ -1980,6 +2021,7 @@ if (isset($_POST['reset_password'])) {
                                             <th style="padding: 12px 16px;">Year</th>
                                             <th style="padding: 12px 16px;">Status</th>
                                             <th style="padding: 12px 16px;">Registered On</th>
+                                            <th style="padding: 12px 16px;">Quiz data</th>
                                             <th style="padding: 12px 16px;">Action</th>
                                         </tr>
                                     </thead>
@@ -2002,9 +2044,27 @@ if (isset($_POST['reset_password'])) {
                                             </td>
                                             <td style="padding: 12px 16px;"><?php echo date('M j, Y', strtotime($session['registered_at'])); ?></td>
                                             <td style="padding: 12px 16px;">
-                                                <a href="quiz.php?session_id=<?php echo (int)$session['id']; ?>" class="btn btn-sm" style="background:#7c3aed; color:white; border:none; border-radius:6px; padding:8px 12px;">
-                                                    <i class="fas fa-play"></i> Take Quiz
-                                                </a>
+                                                <?php
+                                                $csv_folder_year = (string)(isset($_SESSION['year']) && $_SESSION['year'] !== '' ? $_SESSION['year'] : $session['year']);
+                                                $quizReady = quiz_module_quiz_is_available((string)$session['year'], (string)$session['title'], null, $csv_folder_year);
+                                                if ($quizReady): ?>
+                                                    <span class="badge bg-success">Quiz ready</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-secondary" title="No matching CSV in quiz_data for this module/year">No quiz file</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td style="padding: 12px 16px;">
+                                                <?php
+                                                $quiz_status = get_quiz_button_status($conn, $_SESSION['student_id'], $session['id']);
+                                                if ($quiz_status['disabled']): ?>
+                                                    <span style="background: #d1d5db; color: white; padding: 8px 12px; border-radius: 6px; display: inline-block; font-size: 12px;">
+                                                        <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                    </span>
+                                                <?php else: ?>
+                                                    <a href="quiz.php?session_id=<?php echo (int)$session['id']; ?>" class="btn btn-sm" style="background:#7c3aed; color:white; border:none; border-radius:6px; padding:8px 12px;">
+                                                        <i class="fas fa-play"></i> <?php echo htmlspecialchars($quiz_status['label']); ?>
+                                                    </a>
+                                                <?php endif; ?>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>

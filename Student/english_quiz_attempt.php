@@ -1,6 +1,10 @@
 <?php
 require_once 'student_session_check.php';
 require_once __DIR__ . '/../common/english_quiz_loader.php';
+require_once __DIR__ . '/../common/ensure_english_quiz_tables.php';
+
+// Ensure all required tables exist
+ensure_english_quiz_tables($conn);
 
 $error_message = '';
 $success_message = '';
@@ -14,27 +18,8 @@ if ($difficulty === '') {
     exit;
 }
 
-// Check if english_quiz_requests table exists
-$table_check = $conn->query("SHOW TABLES LIKE 'english_quiz_requests'");
-if (!$table_check || $table_check->num_rows == 0) {
-    die("English quiz tables not found. Please run create_english_quiz_tables_final.php first.");
-}
-
-// Verify student has approved request for this difficulty
-$approval_check = $conn->prepare("SELECT id FROM english_quiz_requests WHERE student_id = ? AND difficulty = ? AND status = 'approved' ORDER BY created_at DESC LIMIT 1");
-if ($approval_check) {
-    $approval_check->bind_param("is", $_SESSION['student_id'], $difficulty);
-    $approval_check->execute();
-    $approved_request = $approval_check->get_result()->fetch_assoc();
-    $approval_check->close();
-    
-    if (!$approved_request) {
-        $error_message = "You don't have approval to take the $difficulty quiz. Please request approval first.";
-    }
-}
-
 // Handle quiz submission
-if ($_SERVER["REQUEST_METHOD"] === "POST" && !empty($error_message)) {
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $questions = english_load_questions_from_csv($difficulty);
     $total = count($questions);
     $correct = 0;
@@ -43,9 +28,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && !empty($error_message)) {
     if ($total > 0) {
         $conn->begin_transaction();
         try {
-            // Create attempt record
-            $attempt_stmt = $conn->prepare("INSERT INTO english_quiz_attempts (student_id, difficulty, request_id) VALUES (?, ?, ?)");
-            $attempt_stmt->bind_param("isi", $_SESSION['student_id'], $difficulty, $approved_request['id']);
+            // Create attempt record (no request_id needed anymore)
+            $attempt_stmt = $conn->prepare("INSERT INTO english_quiz_attempts (student_id, difficulty) VALUES (?, ?)");
+            $attempt_stmt->bind_param("is", $_SESSION['student_id'], $difficulty);
             $attempt_stmt->execute();
             $attempt_id = (int)$conn->insert_id;
             $attempt_stmt->close();
@@ -54,15 +39,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && !empty($error_message)) {
             $answer_stmt = $conn->prepare("INSERT INTO english_quiz_answers (attempt_id, topic, question, option_a, option_b, option_c, option_d, selected_answer, correct_answer, is_correct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             
             foreach ($questions as $index => $question) {
-                $selected = strtoupper(trim((string)($answers[$index] ?? '')));
+                $raw = strtoupper(trim((string)($answers[$index] ?? '')));
+                $selected = in_array($raw, ['A', 'B', 'C', 'D'], true) ? $raw : null;
                 $correct_answer = strtoupper($question['correct_answer']);
-                $is_correct = ($selected === $correct_answer) ? 1 : 0;
+                $is_correct = ($selected !== null && $selected === $correct_answer) ? 1 : 0;
                 
                 if ($is_correct) {
                     $correct++;
                 }
                 
-                $answer_stmt->bind_param("isssssssi", 
+                $answer_stmt->bind_param("issssssssi", 
                     $attempt_id, 
                     $question['topic'], 
                     $question['question'], 
@@ -136,14 +122,12 @@ if (empty($error_message) && empty($attempt_data)) {
 
 // Get previous attempts
 $previous_attempts = [];
-if (!empty($error_message)) {
-    $attempts_stmt = $conn->prepare("SELECT score, total_questions, percentage, attempt_date FROM english_quiz_results WHERE student_id = ? AND difficulty = ? ORDER BY attempt_date DESC LIMIT 5");
-    if ($attempts_stmt) {
-        $attempts_stmt->bind_param("is", $_SESSION['student_id'], $difficulty);
-        $attempts_stmt->execute();
-        $previous_attempts = $attempts_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $attempts_stmt->close();
-    }
+$attempts_stmt = $conn->prepare("SELECT score, total_questions, percentage, attempt_date FROM english_quiz_results WHERE student_id = ? AND difficulty = ? ORDER BY attempt_date DESC LIMIT 5");
+if ($attempts_stmt) {
+    $attempts_stmt->bind_param("is", $_SESSION['student_id'], $difficulty);
+    $attempts_stmt->execute();
+    $previous_attempts = $attempts_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $attempts_stmt->close();
 }
 ?>
 <!DOCTYPE html>
@@ -156,6 +140,111 @@ if (!empty($error_message)) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="../common/theme.css">
     <style>
+        body {
+            background: #f8f9fa;
+        }
+
+        .navbar-custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .dashboard-sidebar {
+            position: fixed;
+            left: 0;
+            top: 64px;
+            width: 250px;
+            height: calc(100vh - 64px);
+            background: white;
+            border-right: 1px solid #e5e7eb;
+            overflow-y: auto;
+            z-index: 999;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+
+        .dashboard-sidebar.show {
+            transform: translateX(0);
+        }
+
+        .sidebar-logo {
+            padding: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sidebar-logo img {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+        }
+
+        .sidebar-nav {
+            padding: 20px 0;
+        }
+
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: #6b7280;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar-link:hover {
+            background: #f3f4f6;
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+
+        .sidebar-link.active {
+            background: #f3f4f6;
+            color: #667eea;
+            border-left-color: #667eea;
+            font-weight: 600;
+        }
+
+        .main-dashboard-content {
+            margin-left: 250px;
+            margin-top: 64px;
+            padding: 30px 20px;
+            min-height: calc(100vh - 64px);
+        }
+
+        .mobile-sidebar-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            margin-right: 15px;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 998;
+        }
+
+        body.sidebar-open .dashboard-sidebar {
+            transform: translateX(0);
+        }
+
+        body.sidebar-open .sidebar-overlay {
+            display: block;
+        }
+
         .quiz-container {
             max-width: 800px;
             margin: 0 auto;
@@ -180,16 +269,6 @@ if (!empty($error_message)) {
             font-weight: 500;
             margin-left: 5px;
         }
-        .timer {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: white;
-            padding: 10px 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            z-index: 1000;
-        }
         .result-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -201,22 +280,103 @@ if (!empty($error_message)) {
             max-height: 300px;
             overflow-y: auto;
         }
+
+        @media (max-width: 768px) {
+            .mobile-sidebar-toggle {
+                display: block;
+            }
+
+            .main-dashboard-content {
+                margin-left: 0;
+                padding: 20px 15px;
+            }
+
+            .dashboard-sidebar {
+                width: 100%;
+                max-width: 250px;
+            }
+        }
     </style>
 </head>
-<body style="background: #f8f9fa;">
-    <nav class="navbar navbar-dark" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
         <div class="container-lg">
-            <span class="navbar-brand">
-                <i class="fas fa-language"></i>
-                <?php echo ucfirst($difficulty); ?> English Quiz
-            </span>
-            <a href="english_quiz.php" class="btn btn-outline-light btn-sm">
-                <i class="fas fa-arrow-left"></i> Back to Levels
+            <button type="button" class="mobile-sidebar-toggle" id="mobileSidebarToggle" aria-label="Toggle sidebar">
+                <i class="fas fa-bars"></i>
+            </button>
+            <a class="navbar-brand" href="english_quiz.php">
+                <i class="fas fa-language"></i> English Quiz
             </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <div class="user-info" style="display: flex; align-items: center; gap: 10px; color: white;">
+                            <i class="fas fa-user-circle"></i> 
+                            <div>
+                                <div style="font-weight: 600;"><?php echo htmlspecialchars($_SESSION['full_name']); ?></div>
+                                <small><?php echo htmlspecialchars($_SESSION['email']); ?></small>
+                            </div>
+                        </div>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="english_quiz.php">
+                            <i class="fas fa-arrow-left"></i> Back to Levels
+                        </a>
+                    </li>
+                </ul>
+            </div>
         </div>
     </nav>
 
-    <div class="container-lg py-4">
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- Sidebar -->
+    <div class="dashboard-sidebar" id="studentSidebar">
+        <div class="sidebar-logo">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <img src="../images/SA%20Main%20logo.jpg" alt="SA Main Logo" title="SA Main">
+                <div style="display: flex; flex-direction: column;">
+                    <span style="font-size: 14px; font-weight: 700; color: #7c3aed; line-height: 1.2;">SPECANCIENS</span>
+                    <span style="font-size: 12px; font-weight: 700; color: #6b7280; line-height: 1.2;">IAP Portal</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Menu -->
+        <div class="sidebar-nav">
+            <a href="student_dashboard.php" class="sidebar-link">
+                <i class="fas fa-home"></i> Dashboard
+            </a>
+            <a href="english_quiz.php" class="sidebar-link active">
+                <i class="fas fa-language"></i> English Quiz
+            </a>
+            <a href="student_dashboard.php?view=view_all_sessions" class="sidebar-link">
+                <i class="fas fa-list"></i> View All Sessions
+            </a>
+            <a href="student_dashboard.php?view=view_registered_sessions" class="sidebar-link">
+                <i class="fas fa-check-circle"></i> View Registered Sessions
+            </a>
+            <a href="student_dashboard.php?view=view_progress" class="sidebar-link">
+                <i class="fas fa-chart-line"></i> View Progress
+            </a>
+            <a href="student_dashboard.php?view=edit_profile" class="sidebar-link">
+                <i class="fas fa-user-edit"></i> Edit Profile
+            </a>
+            <a href="pronunciation.php" class="sidebar-link">
+                <i class="fas fa-microphone-alt"></i> Phonetics Practice
+            </a>
+            <a href="student_dashboard.php?view=reset_password" class="sidebar-link">
+                <i class="fas fa-key"></i> Reset Password
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-dashboard-content">
         <!-- Messages -->
         <?php if (!empty($error_message)): ?>
             <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -351,7 +511,25 @@ if (!empty($error_message)) {
         <?php endif; ?>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Mobile sidebar toggle
+        const mobileSidebarToggle = document.getElementById('mobileSidebarToggle');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        const studentSidebar = document.getElementById('studentSidebar');
+
+        if (mobileSidebarToggle) {
+            mobileSidebarToggle.addEventListener('click', function() {
+                document.body.classList.toggle('sidebar-open');
+            });
+        }
+
+        if (sidebarOverlay) {
+            sidebarOverlay.addEventListener('click', function() {
+                document.body.classList.remove('sidebar-open');
+            });
+        }
+
         // Timer functionality (optional)
         let startTime = Date.now();
         let timerInterval = setInterval(function() {
@@ -367,9 +545,12 @@ if (!empty($error_message)) {
         }, 1000);
 
         // Stop timer when form is submitted
-        document.getElementById('quizForm').addEventListener('submit', function() {
-            clearInterval(timerInterval);
-        });
+        let quizForm = document.getElementById('quizForm');
+        if (quizForm) {
+            quizForm.addEventListener('submit', function() {
+                clearInterval(timerInterval);
+            });
+        }
     </script>
 </body>
 </html>

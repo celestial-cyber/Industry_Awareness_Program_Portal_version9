@@ -12,6 +12,8 @@ if (file_exists($composer_autoload)) {
 }
 
 require_once __DIR__ . '/../common/db.php';
+require_once __DIR__ . '/../common/english_quiz_pdf_report.php';
+require_once __DIR__ . '/../common/module_quiz_pdf_report.php';
 
 // Check and create English quiz tables if they don't exist
 $english_tables = [
@@ -79,6 +81,20 @@ foreach ($english_tables as $table_name => $create_sql) {
             error_log("Created English quiz table: $table_name");
         } else {
             error_log("Error creating English quiz table '$table_name': " . $conn->error);
+        }
+    }
+}
+
+// Legacy installs: ensure difficulty column exists (avoids broken filters / blank difficulty in UI)
+foreach ([
+    'english_quiz_results' => "ALTER TABLE english_quiz_results ADD COLUMN difficulty ENUM('easy','medium','hard') NOT NULL DEFAULT 'medium' AFTER student_id",
+    'english_quiz_attempts' => "ALTER TABLE english_quiz_attempts ADD COLUMN difficulty ENUM('easy','medium','hard') NOT NULL DEFAULT 'medium' AFTER student_id",
+] as $eq_tbl => $eq_alter) {
+    $eq_chk = $conn->query("SHOW TABLES LIKE '" . $conn->real_escape_string($eq_tbl) . "'");
+    if ($eq_chk && $eq_chk->num_rows > 0) {
+        $col_chk = $conn->query("SHOW COLUMNS FROM `" . str_replace('`', '', $eq_tbl) . "` LIKE 'difficulty'");
+        if ($col_chk && $col_chk->num_rows === 0) {
+            $conn->query($eq_alter);
         }
     }
 }
@@ -345,6 +361,7 @@ $conn->query($sql);
 $message = '';
 $password_popup_message = '';
 $page = isset($_GET['page']) ? $_GET['page'] : 'home';
+
 $valid_years = ['1', '2', '3', '4', 'Graduate'];
 $valid_departments = ['Computer Science', 'Electronics', 'Mechanical', 'Electrical', 'Civil', 'AIML', 'Cybersecurity', 'Data Science', 'Other'];
 $psychometric_upload_summary = '';
@@ -1110,8 +1127,34 @@ if ($page == 'requests') {
     $quiz_perf_student_name = trim($_GET['quiz_student_name'] ?? '');
     $quiz_perf_roll = trim($_GET['quiz_roll_number'] ?? '');
 
-    $session_list_sql = "SELECT id, year, {$session_title_column} AS title, session_code FROM iap_sessions ORDER BY year ASC, {$session_title_column} ASC";
-    $session_list_result = $conn->query($session_list_sql);
+    // Load sessions for the selected year (or all if no year selected)
+    $session_list_sql = "SELECT id, year, {$session_title_column} AS title, session_code FROM iap_sessions WHERE 1=1";
+    
+    if ($quiz_perf_year !== '') {
+        $session_list_sql .= " AND year = ?";
+        $session_list_stmt = $conn->prepare($session_list_sql);
+        $session_list_stmt->bind_param('s', $quiz_perf_year);
+        $session_list_stmt->execute();
+        $session_list_result = $session_list_stmt->get_result();
+        $session_list_stmt->close();
+    } else {
+        $session_list_result = $conn->query($session_list_sql);
+    }
+    
+    $session_list_sql .= " ORDER BY year ASC, {$session_title_column} ASC";
+    
+    if ($quiz_perf_year !== '') {
+        $session_list_sql = "SELECT id, year, {$session_title_column} AS title, session_code FROM iap_sessions WHERE year = ? ORDER BY year ASC, {$session_title_column} ASC";
+        $session_list_stmt = $conn->prepare($session_list_sql);
+        $session_list_stmt->bind_param('s', $quiz_perf_year);
+        $session_list_stmt->execute();
+        $session_list_result = $session_list_stmt->get_result();
+        $session_list_stmt->close();
+    } else {
+        $session_list_sql = "SELECT id, year, {$session_title_column} AS title, session_code FROM iap_sessions ORDER BY year ASC, {$session_title_column} ASC";
+        $session_list_result = $conn->query($session_list_sql);
+    }
+    
     if ($session_list_result) {
         while ($srow = $session_list_result->fetch_assoc()) {
             $quiz_perf_sessions[] = $srow;
@@ -1120,15 +1163,18 @@ if ($page == 'requests') {
 
     $perf_sql = "SELECT
                     qa.id,
+                    qa.attempt_id,
                     st.full_name,
                     st.roll_number,
+                    st.year AS student_academic_year,
                     s.{$session_title_column} AS module_name,
                     s.session_code,
-                    s.year,
+                    s.year AS module_year,
                     qa.score,
                     qa.percentage,
                     qa.total_questions,
                     qa.correct_answers,
+                    (qa.total_questions - qa.correct_answers) AS wrong_answers,
                     qa.attempt_date AS attempted_at
                  FROM quiz_results qa
                  INNER JOIN iap_students st ON st.id = qa.student_id
@@ -1174,6 +1220,36 @@ if ($page == 'requests') {
     }
 } else if ($page == 'manage_psychometric_questions') {
     $psychometric_questions_result = $conn->query("SELECT id, question, option_a, option_b, option_c, option_d, correct_answer, created_at FROM iap_psychometric_questions ORDER BY id DESC LIMIT 50");
+}
+
+// Full-page English quiz report (must run before HTML output)
+if ($page === 'english_quiz_performance' && isset($_GET['view_english_quiz_report']) && (int)($_GET['attempt_id'] ?? 0) > 0) {
+    $view_attempt = (int)$_GET['attempt_id'];
+    try {
+        $english_view_report = new EnglishQuizPDFReport($conn, $view_attempt);
+        header('Content-Type: text/html; charset=UTF-8');
+        echo $english_view_report->generate_html(true);
+    } catch (Throwable) {
+        http_response_code(404);
+        header('Content-Type: text/html; charset=UTF-8');
+        echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report</title></head><body style="font-family:Segoe UI,sans-serif;padding:24px;">';
+        echo '<p>Report could not be loaded.</p><p><a href="?page=english_quiz_performance">Back to English Quiz Performance</a></p></body></html>';
+    }
+    exit;
+}
+if ($page === 'module_quiz_performance' && isset($_GET['view_module_quiz_report']) && (int)($_GET['attempt_id'] ?? 0) > 0) {
+    $mod_view_attempt = (int)$_GET['attempt_id'];
+    try {
+        $mod_view_report = new ModuleQuizPDFReport($conn, $mod_view_attempt);
+        header('Content-Type: text/html; charset=UTF-8');
+        echo $mod_view_report->generate_html(true);
+    } catch (Throwable) {
+        http_response_code(404);
+        header('Content-Type: text/html; charset=UTF-8');
+        echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report</title></head><body style="font-family:Segoe UI,sans-serif;padding:24px;">';
+        echo '<p>Report could not be loaded.</p><p><a href="?page=module_quiz_performance">Back to Module Quiz Performance</a></p></body></html>';
+    }
+    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -1814,6 +1890,54 @@ if ($page == 'requests') {
         .psychometric-overview .engagement-stats > div {
             text-align: center;
             flex: 1;
+        }
+
+        .english-quiz-filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+            align-items: end;
+        }
+
+        .english-quiz-actions {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .english-quiz-actions a {
+            text-decoration: none;
+        }
+
+        .difficulty-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .difficulty-badge.easy {
+            background: #198754;
+            color: #fff;
+        }
+
+        .difficulty-badge.medium {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .difficulty-badge.hard {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        .table-english-quiz th,
+        .table-english-quiz td {
+            white-space: normal;
+            vertical-align: middle;
         }
 
         @media (max-width: 991.98px) {
@@ -2633,43 +2757,24 @@ if ($page == 'requests') {
                     <p class="no-data">No registrations found.</p>
                 <?php endif; ?>
             <?php elseif ($page == 'english_quiz_performance'): ?>
-                <h2 class="section-title">English Quiz Performance</h2>
-                <div class="card mb-3">
-                    <div class="card-body">
-                        <form method="GET" action="" style="display:grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 12px; align-items:end;">
-                            <input type="hidden" name="page" value="english_quiz_performance">
-                            <div>
-                                <label for="english_difficulty"><strong>Difficulty</strong></label>
-                                <select id="english_difficulty" name="english_difficulty" class="form-control">
-                                    <option value="">All</option>
-                                    <option value="easy" <?php echo ($english_perf_difficulty === 'easy') ? 'selected' : ''; ?>>Easy</option>
-                                    <option value="medium" <?php echo ($english_perf_difficulty === 'medium') ? 'selected' : ''; ?>>Medium</option>
-                                    <option value="hard" <?php echo ($english_perf_difficulty === 'hard') ? 'selected' : ''; ?>>Hard</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label for="english_student_name"><strong>Student Name</strong></label>
-                                <input type="text" id="english_student_name" name="english_student_name" class="form-control" value="<?php echo htmlspecialchars($english_perf_student_name); ?>">
-                            </div>
-                            <div>
-                                <label for="english_roll_number"><strong>Roll Number</strong></label>
-                                <input type="text" id="english_roll_number" name="english_roll_number" class="form-control" value="<?php echo htmlspecialchars($english_perf_roll); ?>">
-                            </div>
-                            <div>
-                                <button type="submit" class="btn btn-primary"><i class="fas fa-filter"></i> Filter</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-                
-                <?php 
-                // Fetch English quiz performance
-                $english_perf_difficulty = trim($_GET['english_difficulty'] ?? '');
-                $english_perf_student_name = trim($_GET['english_student_name'] ?? '');
-                $english_perf_roll = trim($_GET['english_roll_number'] ?? '');
-                
+                <?php
+                $english_perf_difficulty = trim((string)($_GET['english_difficulty'] ?? ''));
+                $english_perf_student_name = trim((string)($_GET['english_student_name'] ?? ''));
+                $english_perf_roll = trim((string)($_GET['english_roll_number'] ?? ''));
+                $english_perf_topic = trim((string)($_GET['english_topic'] ?? ''));
+                $english_topic_options = [];
+                $english_topic_q = $conn->query("SELECT DISTINCT topic FROM english_quiz_answers ORDER BY topic ASC");
+                if ($english_topic_q) {
+                    while ($english_topic_row = $english_topic_q->fetch_assoc()) {
+                        if (!empty($english_topic_row['topic'])) {
+                            $english_topic_options[] = $english_topic_row['topic'];
+                        }
+                    }
+                }
+
                 $english_perf_sql = "SELECT
                     eqr.id,
+                    eqr.attempt_id,
                     st.full_name,
                     st.roll_number,
                     eqr.difficulty,
@@ -2682,82 +2787,148 @@ if ($page == 'requests') {
                  FROM english_quiz_results eqr
                  INNER JOIN iap_students st ON st.id = eqr.student_id
                  WHERE 1=1";
-                
+
                 $params = [];
                 $types = '';
-                
-                if ($english_perf_difficulty !== '' && in_array($english_perf_difficulty, ['easy', 'medium', 'hard'])) {
+
+                if ($english_perf_difficulty !== '' && in_array($english_perf_difficulty, ['easy', 'medium', 'hard'], true)) {
                     $english_perf_sql .= " AND eqr.difficulty = ?";
                     $params[] = $english_perf_difficulty;
                     $types .= 's';
                 }
-                
+
+                if ($english_perf_topic !== '') {
+                    $english_perf_sql .= " AND EXISTS (SELECT 1 FROM english_quiz_answers eqa WHERE eqa.attempt_id = eqr.attempt_id AND eqa.topic = ?)";
+                    $params[] = $english_perf_topic;
+                    $types .= 's';
+                }
+
                 if ($english_perf_student_name !== '') {
                     $english_perf_sql .= " AND st.full_name LIKE ?";
                     $params[] = '%' . $english_perf_student_name . '%';
                     $types .= 's';
                 }
-                
+
                 if ($english_perf_roll !== '') {
                     $english_perf_sql .= " AND st.roll_number LIKE ?";
                     $params[] = '%' . $english_perf_roll . '%';
                     $types .= 's';
                 }
-                
+
                 $english_perf_sql .= " ORDER BY eqr.attempt_date DESC";
-                
+
+                $english_perf_result = false;
                 $english_perf_stmt = $conn->prepare($english_perf_sql);
-                if ($english_perf_stmt && !empty($params)) {
-                    $english_perf_stmt->bind_param($types, ...$params);
-                    $english_perf_stmt->execute();
-                    $english_perf_result = $english_perf_stmt->get_result();
+                if ($english_perf_stmt) {
+                    if ($types !== '') {
+                        $english_perf_stmt->bind_param($types, ...$params);
+                    }
+                    if ($english_perf_stmt->execute()) {
+                        $english_perf_result = $english_perf_stmt->get_result();
+                    }
                     $english_perf_stmt->close();
                 }
                 ?>
-                <?php if (isset($english_perf_result) && $english_perf_result && $english_perf_result->num_rows > 0): ?>
+
+                <h2 class="section-title">English Quiz Performance</h2>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <form method="GET" action="" class="english-quiz-filters">
+                            <input type="hidden" name="page" value="english_quiz_performance">
+                            <div>
+                                <label for="english_difficulty"><strong>Difficulty</strong></label>
+                                <select id="english_difficulty" name="english_difficulty" class="form-control" onchange="this.form.submit();">
+                                    <option value="">All Levels</option>
+                                    <option value="easy" <?php echo ($english_perf_difficulty === 'easy') ? 'selected' : ''; ?>>Easy</option>
+                                    <option value="medium" <?php echo ($english_perf_difficulty === 'medium') ? 'selected' : ''; ?>>Medium</option>
+                                    <option value="hard" <?php echo ($english_perf_difficulty === 'hard') ? 'selected' : ''; ?>>Hard</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="english_topic"><strong>Module / Topic</strong></label>
+                                <select id="english_topic" name="english_topic" class="form-control" onchange="this.form.submit();">
+                                    <option value="">All Topics</option>
+                                    <?php foreach ($english_topic_options as $top): ?>
+                                        <option value="<?php echo htmlspecialchars($top, ENT_QUOTES, 'UTF-8'); ?>" <?php echo ($english_perf_topic === $top) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($top, ENT_QUOTES, 'UTF-8'); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="english_student_name"><strong>Student Name</strong></label>
+                                <input type="text" id="english_student_name" name="english_student_name" class="form-control" placeholder="Search..." value="<?php echo htmlspecialchars($english_perf_student_name); ?>">
+                            </div>
+                            <div>
+                                <label for="english_roll_number"><strong>Roll Number</strong></label>
+                                <input type="text" id="english_roll_number" name="english_roll_number" class="form-control" placeholder="Search..." value="<?php echo htmlspecialchars($english_perf_roll); ?>">
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:8px;">
+                                <button type="submit" class="btn btn-primary"><i class="fas fa-filter"></i> Apply filters</button>
+                                <a class="btn btn-light" style="text-align:center; border:1px solid #dee2e6; border-radius:4px; padding:8px; color:white;" href="?page=english_quiz_performance">Reset</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <?php if ($english_perf_result && $english_perf_result->num_rows > 0): ?>
                     <div class="table-responsive">
-                        <table>
+                        <table class="table table-bordered table-striped table-english-quiz">
                             <thead>
                                 <tr>
                                     <th>Student Name</th>
                                     <th>Roll Number</th>
-                                    <th>Difficulty</th>
+                                    <th>Difficulty Level</th>
                                     <th>Score</th>
                                     <th>Percentage</th>
                                     <th>Attempt Date</th>
-                                    <th>Topics Covered</th>
+                                    <th style="min-width:200px;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php while($eperf = $english_perf_result->fetch_assoc()): ?>
+                                <?php while ($eperf = $english_perf_result->fetch_assoc()): ?>
+                                    <?php
+                                    $dkey = strtolower((string)($eperf['difficulty'] ?? ''));
+                                    if (!in_array($dkey, ['easy', 'medium', 'hard'], true)) {
+                                        $dkey = 'medium';
+                                    }
+                                    $attempt_id_row = (int)($eperf['attempt_id'] ?? 0);
+                                    ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($eperf['full_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($eperf['roll_number']); ?></td>
+                                        <td><?php echo htmlspecialchars((string)($eperf['full_name'] ?? '')); ?></td>
+                                        <td><?php echo htmlspecialchars((string)($eperf['roll_number'] ?? '')); ?></td>
                                         <td>
-                                            <?php
-                                            $difficultyClass = $eperf['difficulty'] === 'easy' ? 'success' : ($eperf['difficulty'] === 'medium' ? 'warning' : 'danger');
-                                            ?>
-                                            <span class="badge bg-<?php echo $difficultyClass; ?>">
-                                                <?php echo ucfirst($eperf['difficulty']); ?>
+                                            <span class="difficulty-badge <?php echo htmlspecialchars($dkey); ?>">
+                                                <?php echo htmlspecialchars(ucfirst($dkey)); ?>
                                             </span>
                                         </td>
-                                        <td><?php echo htmlspecialchars($eperf['score'] . '/' . $eperf['total_questions']); ?></td>
-                                        <td><?php echo htmlspecialchars(number_format((float)$eperf['percentage'], 2)); ?>%</td>
-                                        <td><?php echo htmlspecialchars(date('M j, Y g:i A', strtotime($eperf['attempted_at']))); ?></td>
-                                        <td><small><?php echo htmlspecialchars(substr($eperf['topics_covered'], 0, 100)); ?></small></td>
+                                        <td><strong><?php echo (int)($eperf['score'] ?? 0); ?> / <?php echo (int)($eperf['total_questions'] ?? 0); ?></strong></td>
+                                        <td><strong><?php echo htmlspecialchars(number_format((float)($eperf['percentage'] ?? 0), 2)); ?>%</strong></td>
+                                        <td><?php echo htmlspecialchars(date('M j, Y g:i A', strtotime((string)($eperf['attempted_at'] ?? 'now')))); ?></td>
+                                        <td>
+                                            <div class="english-quiz-actions">
+                                                <a class="btn btn-sm btn-secondary" href="?page=english_quiz_performance&amp;view_english_quiz_report=1&amp;attempt_id=<?php echo $attempt_id_row; ?>" target="_blank" rel="noopener" title="View detailed report">
+                                                    <i class="fas fa-eye"></i> View Report
+                                                </a>
+                                                <a class="btn btn-sm btn-info" href="?page=english_quiz_performance&amp;download_english_quiz_report=1&amp;attempt_id=<?php echo $attempt_id_row; ?>" target="_blank" rel="noopener" title="Download PDF (or HTML fallback)">
+                                                    <i class="fas fa-file-pdf"></i> Download PDF
+                                                </a>
+                                            </div>
+                                        </td>
                                     </tr>
                                 <?php endwhile; ?>
                             </tbody>
                         </table>
                     </div>
                 <?php else: ?>
-                    <p class="no-data">No English quiz attempts found for selected filters.</p>
+                    <p class="no-data">No English quiz attempts found for the selected filters.</p>
                 <?php endif; ?>
             <?php elseif ($page == 'module_quiz_performance'): ?>
                 <h2 class="section-title">Module Quiz Performance</h2>
+                <p class="text-muted" style="margin-bottom:16px;">Analytics for session/module MCQ attempts. Reports include question-level review and weak-topic hints.</p>
                 <div class="card mb-3">
                     <div class="card-body">
-                        <form method="GET" action="" style="display:grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px; align-items:end;">
+                        <form method="GET" action="" class="english-quiz-filters" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items:end;">
                             <input type="hidden" name="page" value="module_quiz_performance">
                             <div>
                                 <label for="quiz_year"><strong>Year</strong></label>
@@ -2798,28 +2969,44 @@ if ($page == 'requests') {
 
                 <?php if (isset($quiz_performance_result) && $quiz_performance_result && $quiz_performance_result->num_rows > 0): ?>
                     <div class="table-responsive">
-                        <table>
+                        <table class="table table-bordered table-striped table-english-quiz">
                             <thead>
                                 <tr>
                                     <th>Student Name</th>
                                     <th>Roll Number</th>
+                                    <th>Academic Year</th>
                                     <th>Module</th>
-                                    <th>Year</th>
+                                    <th>Catalog Year</th>
                                     <th>Score</th>
                                     <th>Percentage</th>
+                                    <th>Total Q</th>
+                                    <th>Correct</th>
+                                    <th>Wrong</th>
                                     <th>Attempt Date</th>
+                                    <th style="min-width:200px;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php while($prow = $quiz_performance_result->fetch_assoc()): ?>
+                                <?php while ($prow = $quiz_performance_result->fetch_assoc()): ?>
+                                    <?php $aid = (int)($prow['attempt_id'] ?? 0); ?>
                                     <tr>
                                         <td><?php echo htmlspecialchars($prow['full_name']); ?></td>
                                         <td><?php echo htmlspecialchars($prow['roll_number']); ?></td>
+                                        <td><?php echo htmlspecialchars((string)($prow['student_academic_year'] ?? '')); ?></td>
                                         <td><?php echo htmlspecialchars(($prow['session_code'] ? $prow['session_code'] . ' - ' : '') . $prow['module_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($prow['year']); ?></td>
+                                        <td><?php echo htmlspecialchars((string)($prow['module_year'] ?? '')); ?></td>
                                         <td><?php echo htmlspecialchars($prow['score'] . '/' . $prow['total_questions']); ?></td>
                                         <td><?php echo htmlspecialchars(number_format((float)$prow['percentage'], 2)); ?>%</td>
+                                        <td><?php echo (int)$prow['total_questions']; ?></td>
+                                        <td><?php echo (int)$prow['correct_answers']; ?></td>
+                                        <td><?php echo (int)($prow['wrong_answers'] ?? max(0, (int)$prow['total_questions'] - (int)$prow['correct_answers'])); ?></td>
                                         <td><?php echo htmlspecialchars(date('M j, Y g:i A', strtotime($prow['attempted_at']))); ?></td>
+                                        <td>
+                                            <div class="english-quiz-actions">
+                                                <a class="btn btn-sm btn-secondary" href="?page=module_quiz_performance&amp;view_module_quiz_report=1&amp;attempt_id=<?php echo $aid; ?>" target="_blank" rel="noopener">View Report</a>
+                                                <a class="btn btn-sm btn-info" href="?page=module_quiz_performance&amp;download_module_quiz_report=1&amp;attempt_id=<?php echo $aid; ?>" target="_blank" rel="noopener">Download PDF</a>
+                                            </div>
+                                        </td>
                                     </tr>
                                 <?php endwhile; ?>
                             </tbody>
@@ -3222,6 +3409,112 @@ if ($page == 'requests') {
         alert(<?php echo json_encode($password_popup_message); ?>);
     </script>
     <?php endif; ?>
+
+    <?php if ($page == 'module_quiz_performance'): ?>
+    <script>
+        /**
+         * Dynamic Module Filter for Module Quiz Performance
+         * Loads modules based on selected academic year
+         */
+        (function() {
+            const yearSelect = document.getElementById('quiz_year');
+            const moduleSelect = document.getElementById('quiz_session_id');
+            const currentModuleId = <?php echo json_encode($quiz_perf_session); ?>;
+
+            if (!yearSelect || !moduleSelect) {
+                console.error('Module Quiz Performance: Required elements not found');
+                return;
+            }
+
+            console.log('Module Quiz Performance dynamic filter initialized');
+            console.log('Current module ID:', currentModuleId);
+
+            // Function to load sessions for selected year
+            function loadSessionsByYear(year) {
+                console.log('Loading sessions for year:', year);
+
+                // Show loading state
+                const originalOptions = moduleSelect.innerHTML;
+                moduleSelect.innerHTML = '<option value="0">Loading modules...</option>';
+                moduleSelect.disabled = true;
+
+                // Build absolute URL for AJAX endpoint
+                const baseUrl = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/Admin/'));
+                const apiUrl = baseUrl + '/Admin/get_sessions_by_year.php?year=' + encodeURIComponent(year);
+                console.log('Fetching from:', apiUrl);
+
+                // Fetch sessions from API
+                fetch(apiUrl)
+                    .then(response => {
+                        console.log('Response status:', response.status);
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok: ' + response.status);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Sessions loaded:', data);
+
+                        if (data.success && data.sessions && data.sessions.length > 0) {
+                            // Clear and rebuild module dropdown
+                            moduleSelect.innerHTML = '<option value="0">All Modules</option>';
+
+                            // Add sessions to dropdown
+                            data.sessions.forEach(session => {
+                                const option = document.createElement('option');
+                                option.value = session.id;
+                                option.textContent = session.display;
+
+                                // Re-select if it was previously selected
+                                if (currentModuleId === session.id) {
+                                    option.selected = true;
+                                    console.log('Re-selected module:', session.display);
+                                }
+
+                                moduleSelect.appendChild(option);
+                            });
+
+                            console.log('✓ Loaded ' + data.count + ' modules for year: ' + year);
+                        } else if (data.success && (!data.sessions || data.sessions.length === 0)) {
+                            moduleSelect.innerHTML = '<option value="0">No modules available for this year</option>';
+                            console.log('No modules found for year:', year);
+                        } else {
+                            moduleSelect.innerHTML = '<option value="0">Error loading modules</option>';
+                            console.error('API returned error:', data);
+                        }
+
+                        moduleSelect.disabled = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading sessions:', error);
+                        moduleSelect.innerHTML = originalOptions;
+                        moduleSelect.disabled = false;
+                        console.error('Restored original options due to error');
+                    });
+            }
+
+            // Load sessions when year changes
+            yearSelect.addEventListener('change', function() {
+                console.log('Year changed to:', this.value);
+                loadSessionsByYear(this.value);
+            });
+
+            // Load initial sessions on page load if year is selected
+            if (yearSelect.value) {
+                console.log('Initial load for year:', yearSelect.value);
+                // Use setTimeout to ensure DOM is ready
+                setTimeout(() => {
+                    loadSessionsByYear(yearSelect.value);
+                }, 100);
+            } else {
+                console.log('No year selected on initial load');
+            }
+
+            console.log('Module Quiz Performance dynamic filter ready');
+        })();
+    </script>
+    <?php endif; ?>
+
 </body>
 </html>
 <?php
