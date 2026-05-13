@@ -96,7 +96,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['difficulty'])) {
         }
 
         .main-dashboard-content {
-            margin-left: 250px;
+            margin-left: 0;
             margin-top: 64px;
             padding: 30px 20px;
             min-height: calc(100vh - 64px);
@@ -129,6 +129,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['difficulty'])) {
 
         body.sidebar-open .sidebar-overlay {
             display: block;
+        }
+
+        body.sidebar-open .main-dashboard-content {
+            margin-left: 250px;
         }
 
         .difficulty-card {
